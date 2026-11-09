@@ -8,6 +8,7 @@ import {
   startTelegramLinkAction,
   telegramBotDmAction,
   telegramForwardAction,
+  telegramOfflineNotifyAction,
   telegramUnlinkAction,
 } from "@/app/actions/telegram";
 import { useI18n } from "@/components/i18n-provider";
@@ -24,6 +25,7 @@ export type TelegramCardProps = {
     chatName: string;
     username: string | null;
     forwardEnabled: boolean;
+    offlineNotify: boolean;
     allowBotDm: boolean;
     mutedRooms: Array<{ id: string; name: string }>;
   } | null;
@@ -46,7 +48,7 @@ export function TelegramCard({ telegramEnabled, paid, allowed, botUsername, link
   const toggleDisabled = !telegramEnabled || (paid && !allowed);
 
   return (
-    <section id="telegram" className="glass card border-white/40 p-5 shadow-glass sm:p-6">
+    <section id="telegram" className="glass card scroll-mt-20 border-white/40 p-5 shadow-glass sm:p-6">
       <div className="flex flex-wrap items-center gap-4">
         <span className="grid size-12 shrink-0 place-items-center rounded-2xl bg-gradient-to-br from-[#2AABEE] to-[#229ED9] text-white shadow-soft">
           <Send className="size-5" />
@@ -155,6 +157,29 @@ export function TelegramCard({ telegramEnabled, paid, allowed, botUsername, link
                   className={cn(
                     "absolute top-[3px] size-[calc(1.45rem-6px)] rounded-full bg-white shadow transition-all",
                     link.forwardEnabled ? "start-[calc(100%-1.45rem+3px)]" : "start-[3px]",
+                  )}
+                />
+              </span>
+            </SubmitButton>
+          </ActionForm>
+
+          <ActionForm action={telegramOfflineNotifyAction} showMessage={false} className="flex items-center justify-between gap-4 rounded-2xl border border-line bg-surface-2/50 p-4">
+            <input type="hidden" name="enabled" value={link.offlineNotify ? "0" : "1"} />
+            <div>
+              <p className="text-sm font-bold text-ink">{t.account.tgOfflineNotify}</p>
+              <p className="mt-0.5 text-xs leading-relaxed text-muted">{t.account.tgOfflineNotifyHint}</p>
+            </div>
+            <SubmitButton className="rounded-full p-0.5" title={t.account.tgOfflineNotify}>
+              <span
+                className={cn(
+                  "relative block h-[1.45rem] w-10 rounded-full transition",
+                  link.offlineNotify ? "bg-gradient-to-r from-accent to-accent-2" : "bg-line-strong",
+                )}
+              >
+                <span
+                  className={cn(
+                    "absolute top-[3px] size-[calc(1.45rem-6px)] rounded-full bg-white shadow transition-all",
+                    link.offlineNotify ? "start-[calc(100%-1.45rem+3px)]" : "start-[3px]",
                   )}
                 />
               </span>

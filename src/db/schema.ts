@@ -32,6 +32,8 @@ export const users = pgTable("users", {
   username: varchar("username", { length: 32 }).notNull().unique(),
   displayName: varchar("display_name", { length: 64 }).notNull(),
   passwordHash: text("password_hash").notNull(),
+  /** optional public profile description (max 280 chars) */
+  bio: varchar("bio", { length: 280 }),
   /** active | suspended */
   status: varchar("status", { length: 16 }).notNull().default("active"),
   /** Access permission managed by the Super Admin */
@@ -68,6 +70,25 @@ export const adminSessions = pgTable("admin_sessions", {
   userAgent: varchar("user_agent", { length: 256 }),
   ip: varchar("ip", { length: 64 }),
 });
+
+/** Telegram-verified password reset codes — only sha256(salt+code) hashes are stored. */
+export const passwordResets = pgTable(
+  "password_resets",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    /** `salt$sha256(salt + 6-digit code)` */
+    codeHash: text("code_hash").notNull(),
+    expiresAt: ts("expires_at").notNull(),
+    usedAt: ts("used_at"),
+    /** wrong-code attempts — the row is deleted after 5 */
+    attempts: integer("attempts").notNull().default(0),
+    createdAt: ts("created_at").notNull().defaultNow(),
+  },
+  (t) => [index("password_resets_user_idx").on(t.userId)],
+);
 
 /* ------------------------------------------------------------------ */
 /* Two-factor authentication (TOTP + recovery codes)                    */
@@ -233,6 +254,10 @@ export const roomMembers = pgTable(
     status: varchar("status", { length: 16 }).notNull().default("active"),
     /** room password version this member unlocked */
     passwordVersion: integer("password_version").notNull().default(0),
+    /** last time an authenticated member READ this room (unread tracking) */
+    lastReadAt: ts("last_read_at"),
+    /** last time the offline-notify sweep pinged Telegram for this member */
+    tgNotifiedAt: ts("tg_notified_at"),
     createdAt: ts("created_at").notNull().defaultNow(),
     lastSeenAt: ts("last_seen_at").notNull().defaultNow(),
   },
@@ -276,6 +301,8 @@ export const messages = pgTable(
     /** web | telegram | system */
     source: varchar("source", { length: 16 }).notNull().default("web"),
     body: text("body").notNull(),
+    /** Giphy gif id — the browser renders it through the server proxy route */
+    gifId: varchar("gif_id", { length: 64 }),
     fileId: uuid("file_id").references(() => files.id, { onDelete: "set null" }),
     fileName: varchar("file_name", { length: 200 }),
     fileMime: varchar("file_mime", { length: 100 }),
@@ -353,6 +380,8 @@ export const telegramLinks = pgTable(
     allowBotDm: boolean("allow_bot_dm").notNull().default(false),
     /** master switch for message forwarding */
     forwardEnabled: boolean("forward_enabled").notNull().default(true),
+    /** digest ping when the user has been away for 15+ minutes (offline notify) */
+    offlineNotify: boolean("offline_notify").notNull().default(false),
     /** rooms muted for notifications (uuid strings) */
     mutedRooms: jsonb("muted_rooms").$type<string[]>().notNull().default([]),
     createdAt: ts("created_at").notNull().defaultNow(),
@@ -373,6 +402,24 @@ export const telegramLinkCodes = pgTable("telegram_link_codes", {
 
 export type TelegramLink = typeof telegramLinks.$inferSelect;
 export type TelegramLinkCode = typeof telegramLinkCodes.$inferSelect;
+
+/* ------------------------------------------------------------------ */
+/* Profile avatars (one per account)                                   */
+/* ------------------------------------------------------------------ */
+
+/**
+ * A user's profile picture. Bytes live in Postgres exactly like room media,
+ * sniffed from magic bytes before insert; a new upload replaces the old row.
+ */
+export const userAvatars = pgTable("user_avatars", {
+  userId: uuid("user_id")
+    .primaryKey()
+    .references(() => users.id, { onDelete: "cascade" }),
+  /** sniffed from magic bytes — never trusted from the client */
+  mime: varchar("mime", { length: 32 }).notNull(),
+  data: bytea("data").notNull(),
+  updatedAt: ts("updated_at").notNull().defaultNow(),
+});
 
 /* ------------------------------------------------------------------ */
 /* Platform                                                            */
@@ -404,3 +451,5 @@ export type RoomMember = typeof roomMembers.$inferSelect;
 export type Message = typeof messages.$inferSelect;
 export type TelegramBot = typeof telegramBots.$inferSelect;
 export type FileRow = typeof files.$inferSelect;
+export type UserAvatar = typeof userAvatars.$inferSelect;
+export type PasswordReset = typeof passwordResets.$inferSelect;

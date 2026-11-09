@@ -1,25 +1,18 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import Link from "next/link";
+import { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { EyeOff, FolderLock, KeyRound, MoreHorizontal, ShieldCheck } from "lucide-react";
+import { EyeOff, MoreHorizontal } from "lucide-react";
 import { PandaMark } from "@/components/brand";
 import { useI18n } from "@/components/i18n-provider";
 import { Modal } from "@/components/ui";
 import { APP_NAME, APP_VERSION } from "@/lib/version";
-import {
-  hiddenRoomIds,
-  hideRoom,
-  isRoomHidden,
-  setPin as setVaultPin,
-  unhideRoom,
-  unlockVault,
-  vaultHasPin,
-} from "@/lib/vault";
-import { logoutAction } from "@/app/actions/auth";
+import { hiddenRoomIds, hideRoom, setPin as setVaultPin, vaultHasPin } from "@/lib/vault";
+import { useVersionTap, VaultDialog, type RoomBrief } from "@/components/security/vault-dialog";
 
-export type RoomBrief = { id: string; name: string };
+/** @deprecated import from "@/components/security/vault-dialog" — kept for the existing public surface. */
+export type { RoomBrief };
+export { useVersionTap, VaultDialog };
 
 /**
  * Re-applies the pre-paint hidden-room rules after hydration (covers the rare case
@@ -149,54 +142,20 @@ export function HideRoomButton({ roomId }: { roomId: string }) {
 
 /**
  * The secret entrance: Settings → tap the app version 5 times quickly.
- * Asks for the device PIN when hidden chats exist, then lists them.
+ * Thin wrapper now — the gesture lives in useVersionTap() and the whole vault
+ * (PIN setup, unlock, hidden list, PIN change) in VaultDialog, both reusable
+ * from any footer (an About page mounts the same pair).
  */
 export function VersionTap({ rooms }: { rooms: RoomBrief[] }) {
-  const { t, lang } = useI18n();
-  const router = useRouter();
-  const [taps, setTaps] = useState(0);
-  const [hint, setHint] = useState(false);
-  const [stage, setStage] = useState<"closed" | "unlock" | "list">("closed");
-  const [pin, setPin] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [hiddenIds, setHiddenIds] = useState<string[]>([]);
-  const tapTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useEffect(() => () => (tapTimer.current ? clearTimeout(tapTimer.current) : undefined), []);
-
-  const tap = () => {
-    if (tapTimer.current) clearTimeout(tapTimer.current);
-    const next = taps + 1;
-    if (next >= 5) {
-      setTaps(0);
-      openVault();
-      return;
-    }
-    setTaps(next);
-    tapTimer.current = setTimeout(() => setTaps(0), 1400);
-  };
-
-  const openVault = () => {
-    setPin("");
-    setError(null);
-    const ids = hiddenRoomIds();
-    setHiddenIds(ids);
-    if (ids.length === 0) {
-      setHint(true);
-      setTimeout(() => setHint(false), 2200);
-      return;
-    }
-    setStage(vaultHasPin() ? "unlock" : "list");
-  };
-
-  const byId = new Map(rooms.map((r) => [r.id, r.name]));
+  const { lang } = useI18n();
+  const { onTap, open, setOpen } = useVersionTap();
 
   return (
     <>
       <div className="mt-10 flex flex-col items-center gap-1 border-t border-line pt-6 pb-2 text-center">
         <button
           type="button"
-          onClick={tap}
+          onClick={onTap}
           className="flex items-center gap-2 rounded-full px-3 py-1.5 text-xs text-faint transition hover:text-muted"
           aria-label={`${APP_NAME} ${APP_VERSION}`}
           title={`${APP_NAME}`}
@@ -206,94 +165,12 @@ export function VersionTap({ rooms }: { rooms: RoomBrief[] }) {
             {APP_NAME} v{APP_VERSION}
           </span>
         </button>
-        {hint ? <p className="pop-in text-[11px] text-muted">{t.privacy.hiddenHint}</p> : null}
         <p className="text-[10.5px] text-faint">
           {new Date().toLocaleDateString(lang === "fa" ? "fa-IR" : "en-US", { year: "numeric" })} · {APP_NAME}
         </p>
       </div>
 
-      <Modal open={stage === "unlock"} onClose={() => setStage("closed")} title={t.privacy.unlockTitle} subtitle={t.privacy.unlockText}>
-        <form
-          className="space-y-4"
-          onSubmit={async (e) => {
-            e.preventDefault();
-            setError(null);
-            const result = await unlockVault(pin);
-            setPin("");
-            if (!result) {
-              setError(t.privacy.wrongPin);
-              return;
-            }
-            if (result.panicked) {
-              // Panic mode fired: the local vault is gone; lock the session too.
-              setStage("closed");
-              await logoutAction();
-              return;
-            }
-            // REAL pin → list the hidden chats. DECOY pin → an empty, ordinary
-            // vault screen that is indistinguishable from "nothing is hidden".
-            setHiddenIds(result.mode === "real" ? hiddenRoomIds() : []);
-            setStage("list");
-          }}
-        >
-          <input
-            type="password"
-            className="input"
-            value={pin}
-            onChange={(e) => setPin(e.target.value)}
-            placeholder={t.privacy.pin}
-            autoFocus
-            autoComplete="off"
-            dir="ltr"
-          />
-          {error ? <p className="notice notice-rose">{error}</p> : null}
-          <button type="submit" className="btn btn-primary w-full">
-            <KeyRound className="size-4" />
-            {t.common.open}
-          </button>
-        </form>
-      </Modal>
-
-      <Modal open={stage === "list"} onClose={() => setStage("closed")} title={t.privacy.hiddenList}>
-        <div className="space-y-2">
-          {hiddenIds.length === 0 ? <p className="py-4 text-center text-sm text-muted">{t.privacy.noHidden}</p> : null}
-          {hiddenIds.map((id) => (
-            <div key={id} className="flex items-center gap-3 rounded-xl border border-line bg-surface-2 px-3.5 py-3">
-              <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-surface-3 text-accent-ink">
-                <FolderLock className="size-4" />
-              </span>
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-bold text-ink" dir="auto">
-                  {byId.get(id) ?? t.privacy.deletedRoom}
-                </p>
-                <p className="text-[11px] text-muted">{t.privacy.hiddenBadge}</p>
-              </div>
-              {byId.has(id) ? (
-                <Link
-                  href={`/dashboard/rooms/${id}`}
-                  className="btn btn-secondary btn-sm"
-                  onClick={() => setStage("closed")}
-                >
-                  {t.common.open}
-                </Link>
-              ) : null}
-              <button
-                type="button"
-                className="btn btn-ghost btn-sm"
-                onClick={() => {
-                  unhideRoom(id);
-                  setHiddenIds((prev) => prev.filter((x) => x !== id));
-                  router.refresh();
-                }}
-              >
-                <ShieldCheck className="size-4" />
-                {t.privacy.unhide}
-              </button>
-            </div>
-          ))}
-          {hiddenIds.length > 0 ? <p className="pt-2 text-center text-[11px] text-faint">{t.privacy.hiddenNote}</p> : null}
-        </div>
-      </Modal>
+      <VaultDialog open={open} onOpenChange={setOpen} rooms={rooms} />
     </>
   );
 }

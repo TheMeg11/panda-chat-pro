@@ -1,4 +1,7 @@
 import { after } from "next/server";
+import { eq } from "drizzle-orm";
+import { db } from "@/db";
+import { roomMembers } from "@/db/schema";
 import type { Room } from "@/db/schema";
 import { buildSnapshot, normalizeBody, postMessage, softDeleteMessage, touchMember, type ChatRoomOverride, type Viewer } from "./chat";
 import { storeFile } from "./files";
@@ -32,9 +35,22 @@ function parseVersion(value: unknown): number | null {
 export async function chatGet(req: Request, room: Room, viewer: ChatViewer, roomOverride?: ChatRoomOverride) {
   const url = new URL(req.url);
   const afterId = Math.max(0, Number(url.searchParams.get("after") ?? 0) || 0);
+  // Mark-as-read: the client sends read=1 only while the tab is visible. Only
+  // authenticated members ("owner"-role rows) bump last_read_at — guests never
+  // do — and a failed write must never break the fetch itself.
+  if (url.searchParams.get("read") === "1" && viewer.role === "owner") {
+    try {
+      await db.update(roomMembers).set({ lastReadAt: new Date() }).where(eq(roomMembers.id, viewer.memberId));
+    } catch (error) {
+      console.error("[panda-chat] mark-read failed", error);
+    }
+  }
   await touchMember(viewer.memberId);
   return json(await buildSnapshot(room, viewer, afterId, parseVersion(url.searchParams.get("v")), roomOverride));
 }
+
+/** Giphy media id charset — safe to interpolate into proxy URLs. */
+const GIF_ID_RE = /^[A-Za-z0-9_-]{3,64}$/;
 
 export async function chatPost(req: Request, room: Room, viewer: ChatViewer, roomOverride?: ChatRoomOverride) {
   if (!isSameOrigin(req)) return json({ error: "unauthorized" }, 403);
@@ -43,7 +59,21 @@ export async function chatPost(req: Request, room: Room, viewer: ChatViewer, roo
   const settings = await getSettings();
   const body = normalizeBody(payload?.body);
   const fileId = typeof payload?.fileId === "string" ? payload.fileId : null;
-  if (!body && !fileId) return json({ error: "messageEmpty" }, 400);
+
+  // GIF messages: id validated, then restricted to authenticated members of
+  // NON-E2EE rooms. A GIF carries no text and no file attachment, and it still
+  // counts against the normal per-member message rate limit.
+  const rawGifId = typeof payload?.gifId === "string" ? payload.gifId.trim() : "";
+  const gifId = GIF_ID_RE.test(rawGifId) ? rawGifId : null;
+  if (rawGifId && !gifId) return json({ error: "badRequest" }, 400);
+  if (gifId) {
+    if (viewer.role === "guest") return json({ error: "gifUnsupported" }, 403);
+    if (room.e2eeEnabled) return json({ error: "gifUnsupported" }, 403); // metadata privacy
+    if (body) return json({ error: "badRequest" }, 400); // a GIF message carries no text
+    if (fileId) return json({ error: "badRequest" }, 400);
+  }
+
+  if (!body && !fileId && !gifId) return json({ error: "messageEmpty" }, 400);
   if (room.isLocked && viewer.role !== "owner") return json({ error: "roomLocked" }, 403);
   if (!rateLimit(`msg:${viewer.memberId}`, 12, 10_000).ok) return json({ error: "rateLimited" }, 429);
 
@@ -67,6 +97,7 @@ export async function chatPost(req: Request, room: Room, viewer: ChatViewer, roo
   const msg = await postMessage(room, viewer, body, Number(payload?.replyToId) || null, "web", fileId, {
     ttlSeconds: ttl,
     encrypted,
+    ...(gifId ? { gifId } : {}),
   });
   // E2EE rooms never forward to Telegram — the bot must NOT receive ciphertext
   // it cannot decrypt, and the server must not ship it a decryption oracle.

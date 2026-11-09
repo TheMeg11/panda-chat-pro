@@ -242,3 +242,42 @@ CREATE TABLE IF NOT EXISTS telegram_link_codes (
   created_at timestamptz NOT NULL DEFAULT now(),
   expires_at timestamptz NOT NULL
 );
+
+-- ----------------------------------------------------------------
+-- v1.5.0 additions (profile, unread, offline notify, GIFs, password
+-- reset) — all idempotent. Every table referenced below (users,
+-- room_members, messages, telegram_links) is created above.
+-- ----------------------------------------------------------------
+
+-- Optional public profile description (max 280 chars).
+ALTER TABLE users ADD COLUMN IF NOT EXISTS bio varchar(280);
+
+-- Telegram-verified password reset codes (sha256(salt+code) hashes only).
+CREATE TABLE IF NOT EXISTS password_resets (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  code_hash text NOT NULL,
+  expires_at timestamptz NOT NULL,
+  used_at timestamptz,
+  attempts integer NOT NULL DEFAULT 0,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS password_resets_user_idx ON password_resets (user_id);
+
+-- Unread tracking + offline-notify dedupe on room membership.
+ALTER TABLE room_members ADD COLUMN IF NOT EXISTS last_read_at timestamptz;
+ALTER TABLE room_members ADD COLUMN IF NOT EXISTS tg_notified_at timestamptz;
+
+-- GIF messages: Giphy media id, rendered through the server proxy route.
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS gif_id varchar(64);
+
+-- Digest ping when a linked user has been away for 15+ minutes.
+ALTER TABLE telegram_links ADD COLUMN IF NOT EXISTS offline_notify boolean NOT NULL DEFAULT false;
+
+-- Profile avatar bytes (one per account; a new upload replaces the old row).
+CREATE TABLE IF NOT EXISTS user_avatars (
+  user_id uuid PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  mime varchar(32) NOT NULL,
+  data bytea NOT NULL,
+  updated_at timestamptz NOT NULL DEFAULT now()
+);

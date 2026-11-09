@@ -51,6 +51,13 @@ const securityHeaders = [
 
 const nextConfig: NextConfig = {
   poweredByHeader: false,
+  // Avatar uploads go through a server action — the default 1 MB action body
+  // limit is too small for the 2 MB avatars the backend accepts.
+  experimental: {
+    serverActions: {
+      bodySizeLimit: "3mb",
+    },
+  },
   async headers() {
     return [
       { source: "/:path*", headers: securityHeaders },

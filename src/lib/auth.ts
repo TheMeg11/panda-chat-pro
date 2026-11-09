@@ -3,7 +3,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
-import { sessions, users, type User } from "@/db/schema";
+import { sessions, userAvatars, users, type User } from "@/db/schema";
 import { randomToken, sha256 } from "./crypto";
 import { requestMeta } from "./request";
 
@@ -21,7 +21,7 @@ export const SESSION_COOKIE = "pc_session";
 const PERSISTENT_DAYS = 30;
 const EPHEMERAL_HOURS = 12;
 
-export type CurrentUser = User & { sessionId: string; persistent: boolean };
+export type CurrentUser = User & { sessionId: string; persistent: boolean; avatarVersion: number };
 
 export function parseSessionCookie(value: string | undefined | null) {
   if (!value) return null;
@@ -74,7 +74,20 @@ export const getCurrentUser = cache(async (): Promise<CurrentUser | null> => {
       .where(eq(sessions.id, id))
       .catch(() => undefined);
   }
-  return { ...row.user, sessionId: row.session.id, persistent: row.session.persistent };
+  // avatarVersion lets clients cache-bust /api/users/<id>/avatar without
+  // ever shipping the bytes themselves (1 = avatar exists, 0 = none).
+  let avatarVersion = 0;
+  try {
+    const [avatar] = await db
+      .select({ userId: userAvatars.userId })
+      .from(userAvatars)
+      .where(eq(userAvatars.userId, row.user.id))
+      .limit(1);
+    avatarVersion = avatar ? 1 : 0;
+  } catch {
+    /* table not migrated yet */
+  }
+  return { ...row.user, sessionId: row.session.id, persistent: row.session.persistent, avatarVersion };
 });
 
 export async function requireUser(): Promise<CurrentUser> {

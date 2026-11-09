@@ -20,6 +20,8 @@ export type ChatMessage = {
   mine: boolean;
   canDelete: boolean;
   file: ChatFile | null;
+  /** Giphy gif id — rendered through the server proxy route (auth required) */
+  gifId: string | null;
   replyTo: { id: number; authorName: string; body: string; deleted: boolean } | null;
   /** true when body is an E2EE envelope the server cannot read */
   encrypted: boolean;
@@ -152,6 +154,7 @@ function serialize(r: Message, viewer: Viewer, replies: Map<number, NonNullable<
       r.fileId && r.fileName && r.fileMime && r.fileSize !== null
         ? { id: r.fileId, name: r.fileName, mime: r.fileMime, size: r.fileSize }
         : null,
+    gifId: r.gifId ?? null,
     replyTo: r.replyToId ? (replies.get(r.replyToId) ?? { id: r.replyToId, authorName: "", body: "", deleted: true }) : null,
     encrypted: r.encrypted ?? false,
     expiresAt: r.expiresAt ? r.expiresAt.toISOString() : null,
@@ -182,8 +185,11 @@ export async function postMessage(
   replyToId: number | null,
   source: "web" | "telegram",
   fileId: string | null = null,
-  opts: { ttlSeconds?: number | null; encrypted?: boolean } = {},
+  opts: { ttlSeconds?: number | null; encrypted?: boolean; gifId?: string } = {},
 ): Promise<Message> {
+  // GIF id is validated by the API layer; here it is only length-capped so a
+  // stray long value can never overflow the varchar(64) column.
+  const gifId = typeof opts.gifId === "string" && opts.gifId ? opts.gifId.slice(0, 64) : null;
   let replyId: number | null = null;
   if (replyToId && Number.isSafeInteger(replyToId) && replyToId > 0) {
     const [target] = await db
@@ -215,6 +221,7 @@ export async function postMessage(
       source,
       body,
       replyToId: replyId,
+      ...(gifId ? { gifId } : {}),
       ...(fileMeta ? { fileId, fileName: fileMeta.name, fileMime: fileMeta.mime, fileSize: fileMeta.size } : {}),
       ...(opts.ttlSeconds ? { expiresAt: new Date(Date.now() + opts.ttlSeconds * 1000) } : {}),
       ...(opts.encrypted ? { encrypted: true } : {}),

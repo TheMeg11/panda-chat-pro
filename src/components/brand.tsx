@@ -1,3 +1,6 @@
+"use client";
+
+import { useState } from "react";
 import Link from "next/link";
 import { cn, initials, pastelFor } from "@/lib/utils";
 
@@ -53,18 +56,23 @@ export function Avatar({
   size = 36,
   className,
   square = false,
+  src,
 }: {
   name: string;
   size?: number;
   className?: string;
   square?: boolean;
+  /** optional picture URL (e.g. /api/users/<id>/avatar?v=<version>) */
+  src?: string;
 }) {
+  // A broken/missing picture falls back to the initials bubble.
+  const [broken, setBroken] = useState(false);
   const [from, to] = pastelFor(name);
   return (
     <span
       aria-hidden="true"
       className={cn(
-        "inline-grid shrink-0 select-none place-items-center font-extrabold text-[#2f3647]",
+        "relative inline-grid shrink-0 select-none place-items-center overflow-hidden font-extrabold text-[#2f3647]",
         square ? "rounded-[30%]" : "rounded-full",
         className,
       )}
@@ -75,7 +83,18 @@ export function Avatar({
         backgroundImage: `linear-gradient(135deg, ${from}, ${to})`,
       }}
     >
-      {initials(name)}
+      {src && !broken ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={src}
+          alt=""
+          loading="lazy"
+          onError={() => setBroken(true)}
+          className={cn("absolute inset-0 size-full object-cover", square ? "rounded-[30%]" : "rounded-full")}
+        />
+      ) : (
+        initials(name)
+      )}
     </span>
   );
 }

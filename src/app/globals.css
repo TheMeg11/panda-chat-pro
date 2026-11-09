@@ -110,6 +110,7 @@
   --color-accent-ink: var(--accent-ink);
   --color-accent-soft: var(--accent-soft);
   --color-accent-soft-2: var(--accent-soft-2);
+  --color-on-accent: var(--on-accent);
   --color-lavender: var(--lavender);
   --color-lavender-soft: var(--lavender-soft);
   --color-sky: var(--sky);
@@ -648,6 +649,13 @@
   }
   .pop-in {
     animation: pc-pop 0.22s ease-out both;
+  }
+  /* Hide scrollbars (emoji/gif picker grids) while keeping them scrollable. */
+  .no-scrollbar {
+    scrollbar-width: none;
+  }
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
   }
   .float-slow {
     animation: pc-float 7s ease-in-out infinite;

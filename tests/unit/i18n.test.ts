@@ -39,6 +39,22 @@ const KEYS_TO_CHECK = [
   "security.revokeSession",
   "chat.decrypting",
   "dm.chatSettings",
+  "auth.resetTitle",
+  "auth.resetSubtitle",
+  "auth.resetSent",
+  "auth.resetCode",
+  "auth.resetNewPassword",
+  "auth.resetSubmit",
+  "auth.resetConfirmSubmit",
+  "auth.resetDone",
+  "account.bio",
+  "account.avatar",
+  "account.avatarSaved",
+  "account.avatarRemoved",
+  "account.tgOfflineNotify",
+  "account.tgOfflineNotifyHint",
+  "account.tgOfflineNotifyOn",
+  "account.tgOfflineNotifyOff",
 ];
 
 describe("i18n dictionaries (fa/en parity for new features)", () => {
@@ -58,7 +74,21 @@ describe("i18n dictionaries (fa/en parity for new features)", () => {
 
     it(`resolves every new error code in ${lang}`, () => {
       const dict = dictionaries[lang];
-      const codes = ["invalid2faCode", "preAuthExpired", "e2eeRequired", "e2eeInvalidKey", "e2eePeerNotReady", "e2eeUnlockFailed", "featureDisabled", "badRequest"];
+      const codes = [
+        "invalid2faCode",
+        "preAuthExpired",
+        "e2eeRequired",
+        "e2eeInvalidKey",
+        "e2eePeerNotReady",
+        "e2eeUnlockFailed",
+        "featureDisabled",
+        "badRequest",
+        "bioTooLong",
+        "avatarInvalid",
+        "avatarTooSmall",
+        "gifUnsupported",
+        "resetCodeInvalid",
+      ];
       for (const code of codes) {
         expect(errorText(dict, code), `${lang} error ${code}`).not.toBe(dict.errors.generic);
       }

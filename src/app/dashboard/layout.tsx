@@ -3,6 +3,7 @@ import { Megaphone, Wrench } from "lucide-react";
 import { DashboardShell } from "@/components/dashboard/dashboard-shell";
 import { ChatListPanel } from "@/components/dashboard/chat-list";
 import { HiddenRoomsBoot } from "@/components/privacy";
+import { NotifyManager } from "@/components/notify-manager";
 import { TutorialGate } from "@/components/tutorial/tutorial-gate";
 import { requireUser } from "@/lib/auth";
 import { HIDE_BOOT_SCRIPT } from "@/lib/vault-boot";
@@ -63,7 +64,14 @@ export default async function DashboardLayout({ children }: { children: ReactNod
         panel={
           <ChatListPanel
             chats={[]}
-            user={{ displayName: user.displayName, username: user.username }}
+            user={{
+              displayName: user.displayName,
+              username: user.username,
+              id: user.id,
+              bio: user.bio,
+              // 1 = avatar exists; clients append ?v=<avatarVersion> to bust caches
+              avatarVersion: user.avatarVersion,
+            }}
             roomLimit={limit}
             totalRooms={0}
           />
@@ -73,6 +81,8 @@ export default async function DashboardLayout({ children }: { children: ReactNod
         {children}
       </DashboardShell>
       {onboarding ? <TutorialGate state={onboarding} /> : null}
+      {/* Client-side notification runtime: polls /api/chats for unread flips. */}
+      <NotifyManager />
     </div>
   );
 }

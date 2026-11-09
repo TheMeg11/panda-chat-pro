@@ -73,6 +73,28 @@ const MIGRATIONS = [
    )`,
   `alter table telegram_links add column if not exists fallback_room_id uuid references rooms(id) on delete set null`,
   `alter table telegram_links add column if not exists allow_bot_dm boolean not null default false`,
+  // ---- v1.5.0 (profile, unread, offline notify, GIFs, password reset) ----
+  `alter table users add column if not exists bio varchar(280)`,
+  `create table if not exists password_resets (
+     id uuid primary key default gen_random_uuid(),
+     user_id uuid not null references users(id) on delete cascade,
+     code_hash text not null,
+     expires_at timestamptz not null,
+     used_at timestamptz,
+     attempts integer not null default 0,
+     created_at timestamptz not null default now()
+   )`,
+  `create index if not exists password_resets_user_idx on password_resets (user_id)`,
+  `alter table room_members add column if not exists last_read_at timestamptz`,
+  `alter table room_members add column if not exists tg_notified_at timestamptz`,
+  `alter table messages add column if not exists gif_id varchar(64)`,
+  `alter table telegram_links add column if not exists offline_notify boolean not null default false`,
+  `create table if not exists user_avatars (
+     user_id uuid primary key references users(id) on delete cascade,
+     mime varchar(32) not null,
+     data bytea not null,
+     updated_at timestamptz not null default now()
+   )`,
 ];
 
 async function main() {

@@ -5,12 +5,16 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   Ban,
+  Bell,
+  Bot,
+  Info,
   KeyRound,
   LogOut,
   Menu,
   MessageCirclePlus,
   Search,
-  Settings,
+  ShieldCheck,
+  UserRound,
   UserRoundSearch,
   X,
 } from "lucide-react";
@@ -27,7 +31,15 @@ import { cn } from "@/lib/utils";
 type Props = {
   /** initial chats — empty by design (SSR privacy); the list loads from /api/chats */
   chats: DashboardChat[];
-  user: { displayName: string; username: string };
+  user: {
+    displayName: string;
+    username: string;
+    /** needed to render /api/users/<id>/avatar */
+    id: string;
+    bio?: string | null;
+    /** 1 when an avatar row exists — used as a cache-busting query param */
+    avatarVersion?: number;
+  };
   /** visible (non-vault) room count used inside the create-room modal hint */
   roomLimit: number;
   totalRooms: number;
@@ -167,23 +179,67 @@ export function ChatListPanel({ chats: initialChats, user, roomLimit, totalRooms
             <button type="button" className="fixed inset-0 z-30 cursor-default" onClick={() => setMenuOpen(false)} aria-hidden="true" tabIndex={-1} />
             <div className="pop-in absolute start-3 top-[3.4rem] z-40 w-64 overflow-hidden rounded-2xl border border-line bg-surface p-2 shadow-float">
               <div className="flex items-center gap-3 px-2 py-2">
-                <Avatar name={user.displayName} size={38} />
+                <Avatar
+                  name={user.displayName}
+                  size={38}
+                  src={user.avatarVersion ? `/api/users/${user.id}/avatar?v=${user.avatarVersion}` : undefined}
+                />
                 <div className="min-w-0 leading-tight">
                   <p className="truncate text-sm font-bold text-ink">{user.displayName}</p>
                   <p className="text-[11px] text-muted" dir="ltr">
                     @{user.username}
                   </p>
+                  {user.bio ? (
+                    <p className="mt-0.5 truncate text-xs text-muted" dir="auto">
+                      {user.bio}
+                    </p>
+                  ) : null}
                 </div>
               </div>
               <div className="my-1 border-t border-line" />
-              <Link
-                href="/dashboard/settings"
-                onClick={() => setMenuOpen(false)}
-                className="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-semibold text-ink transition hover:bg-surface-3"
-              >
-                <Settings className="size-4" />
-                {t.common.account}
-              </Link>
+              <nav className="flex flex-col">
+                <Link
+                  href="/dashboard/settings#account"
+                  onClick={() => setMenuOpen(false)}
+                  className="flex items-center gap-2.5 rounded-xl px-3 py-2 text-sm font-semibold text-ink transition hover:bg-surface-3"
+                >
+                  <UserRound className="size-4" />
+                  {t.common.account}
+                </Link>
+                <Link
+                  href="/dashboard/settings#notifications"
+                  onClick={() => setMenuOpen(false)}
+                  className="flex items-center gap-2.5 rounded-xl px-3 py-2 text-sm font-semibold text-ink transition hover:bg-surface-3"
+                >
+                  <Bell className="size-4" />
+                  {t.common.notifications}
+                </Link>
+                <Link
+                  href="/dashboard/settings#security"
+                  onClick={() => setMenuOpen(false)}
+                  className="flex items-center gap-2.5 rounded-xl px-3 py-2 text-sm font-semibold text-ink transition hover:bg-surface-3"
+                >
+                  <ShieldCheck className="size-4" />
+                  {t.common.security}
+                </Link>
+                <Link
+                  href="/dashboard/settings#telegram"
+                  onClick={() => setMenuOpen(false)}
+                  className="flex items-center gap-2.5 rounded-xl px-3 py-2 text-sm font-semibold text-ink transition hover:bg-surface-3"
+                >
+                  <Bot className="size-4" />
+                  {t.common.telegramBotSettings}
+                </Link>
+                <Link
+                  href="/dashboard/about"
+                  onClick={() => setMenuOpen(false)}
+                  className="flex items-center gap-2.5 rounded-xl px-3 py-2 text-sm font-semibold text-ink transition hover:bg-surface-3"
+                >
+                  <Info className="size-4" />
+                  {t.common.aboutSite}
+                </Link>
+              </nav>
+              <div className="my-1 border-t border-line" />
               <div className="flex items-center justify-between px-3 py-1.5 text-sm font-semibold text-ink">
                 <span className="flex items-center gap-2.5">
                   <ThemeToggle className="" />
@@ -195,7 +251,7 @@ export function ChatListPanel({ chats: initialChats, user, roomLimit, totalRooms
               <form action={logoutAction}>
                 <button
                   type="submit"
-                  className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-semibold text-rose-ink transition hover:bg-rose-soft"
+                  className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-sm font-semibold text-rose-ink transition hover:bg-rose-soft"
                 >
                   <LogOut className="size-4 rtl:-scale-x-100" />
                   {t.common.logout}

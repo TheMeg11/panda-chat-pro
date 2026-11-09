@@ -5,9 +5,10 @@ import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { and, eq, ne } from "drizzle-orm";
 import { db } from "@/db";
-import { deletedAccounts, messages, roomMembers, rooms, sessions, users } from "@/db/schema";
+import { deletedAccounts, messages, roomMembers, rooms, sessions, userAvatars, users } from "@/db/schema";
 import { getCurrentUser, SESSION_COOKIE } from "@/lib/auth";
 import { hashPassword, verifyPassword } from "@/lib/crypto";
+import { sniffMime } from "@/lib/file-mime";
 import { rateLimit } from "@/lib/rate-limit";
 import { beginEnrollment, confirmEnrollment, disable2fa, getTwoFactorState } from "@/lib/twofactor";
 import { otpauthUrl } from "@/lib/totp";
@@ -18,9 +19,60 @@ export async function updateProfileAction(_prev: ActionState, formData: FormData
   if (!user) return { error: "unauthorized" };
   const displayName = String(formData.get("displayName") ?? "").replace(/\s+/g, " ").trim();
   if (displayName.length < 1 || displayName.length > 40) return { error: "displayNameInvalid" };
-  await db.update(users).set({ displayName }).where(eq(users.id, user.id));
+  const bio = String(formData.get("bio") ?? "").trim();
+  if (bio.length > 280) return { error: "bioTooLong" };
+  await db.update(users).set({ displayName, bio: bio || null }).where(eq(users.id, user.id));
   revalidatePath("/dashboard", "layout");
   return { ok: true, message: "account.profileSaved" };
+}
+
+/* ------------------------------------------------------------------ */
+/* Profile avatar (PNG / JPEG / WebP, magic-byte verified)            */
+/* ------------------------------------------------------------------ */
+
+const AVATAR_MIMES = new Set(["image/png", "image/jpeg", "image/webp"]);
+const AVATAR_MIN_BYTES = 64 * 1024;
+const AVATAR_MAX_BYTES = 2 * 1024 * 1024;
+
+/** Replaces the caller's stored avatar (single row per account). */
+export async function uploadAvatarAction(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  const user = await getCurrentUser();
+  if (!user) return { error: "unauthorized" };
+  if (!rateLimit(`avatar:${user.id}`, 10, 10 * 60_000).ok) return { error: "rateLimited" };
+
+  const file = formData.get("avatar");
+  if (!(file instanceof File) || file.size === 0) return { error: "avatarInvalid" };
+  if (file.size < AVATAR_MIN_BYTES) return { error: "avatarTooSmall" };
+  if (file.size > AVATAR_MAX_BYTES) return { error: "fileTooBig" };
+  if (!AVATAR_MIMES.has(file.type)) return { error: "avatarInvalid" }; // SVG is rejected outright
+
+  const buf = Buffer.from(await file.arrayBuffer());
+  // Magic bytes are authoritative — the client-declared type is never trusted.
+  const sniffed = sniffMime(buf);
+  if (!sniffed || !AVATAR_MIMES.has(sniffed)) return { error: "avatarInvalid" };
+
+  try {
+    await db.delete(userAvatars).where(eq(userAvatars.userId, user.id));
+    await db.insert(userAvatars).values({ userId: user.id, mime: sniffed, data: buf });
+  } catch (error) {
+    console.error("[panda-chat] avatar upload failed", error);
+    return { error: "uploadFailed" };
+  }
+  revalidatePath("/dashboard", "layout");
+  return { ok: true, message: "account.avatarSaved" };
+}
+
+/** Removes the caller's avatar. */
+export async function removeAvatarAction(_prev: ActionState): Promise<ActionState> {
+  void _prev;
+  const user = await getCurrentUser();
+  if (!user) return { error: "unauthorized" };
+  // Same envelope as the upload action: rapid delete+revalidate spam is a
+  // cheap DoS on the dashboard layout otherwise.
+  if (!rateLimit(`avatar-del:${user.id}`, 10, 10 * 60_000).ok) return { error: "rateLimited" };
+  await db.delete(userAvatars).where(eq(userAvatars.userId, user.id));
+  revalidatePath("/dashboard", "layout");
+  return { ok: true, message: "account.avatarRemoved" };
 }
 
 export async function changePasswordAction(_prev: ActionState, formData: FormData): Promise<ActionState> {

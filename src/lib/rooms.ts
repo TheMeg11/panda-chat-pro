@@ -328,6 +328,8 @@ export type DashboardChat = {
   isLocked: boolean;
   isDisabled: boolean;
   messagesCount: number;
+  /** true when someone ELSE posted a message the viewer has not read yet */
+  hasUnread: boolean;
   lastMessage: { author: string; body: string; fileName: string | null } | null;
   lastActivityAt: string;
 };
@@ -374,13 +376,52 @@ export async function listDashboardChats(user: { id: string; displayName: string
   }
 
   const lastRows = await db.execute(sql`
-    select distinct on (room_id) room_id, author_name, body, file_name
+    select distinct on (room_id) room_id, author_name, body, file_name, gif_id
     from messages
     where room_id in (${sql.join(roomIds.map((id) => sql`${id}`), sql`, `)}) and deleted_at is null
     order by room_id, id desc`);
+  // E2EE previews must never ship the raw `e2ee.v1.<iv>.<ct>` envelope (nor
+  // file names) out of the server: the chat list and desktop notifications
+  // would render ciphertext. The placeholder matches the "🔒 E2EE" badge used
+  // verbatim by BOTH locales (see i18n e2ee.badge), so no new key is needed.
+  const E2EE_PREVIEW = "🔒 E2EE";
+  const e2eeRoomIds = new Set(rows.filter((r) => r.room.e2eeEnabled).map((r) => r.room.id));
   const lastMap = new Map<string, { author: string; body: string; fileName: string | null }>();
-  for (const row of lastRows.rows as unknown as Array<{ room_id: string; author_name: string; body: string; file_name: string | null }>) {
-    lastMap.set(row.room_id, { author: row.author_name, body: row.body, fileName: row.file_name });
+  for (const row of lastRows.rows as unknown as Array<{ room_id: string; author_name: string; body: string; file_name: string | null; gif_id: string | null }>) {
+    // A GIF message carries no text — preview it as "GIF" (plain latin) so the
+    // chat list and notification snippets show something instead of empty.
+    const body = row.gif_id && !row.body ? "GIF" : row.body;
+    // E2EE room, or an envelope that predates/lags the room flag → placeholder.
+    if (e2eeRoomIds.has(row.room_id) || body.startsWith("e2ee.v1.")) {
+      lastMap.set(row.room_id, { author: row.author_name, body: E2EE_PREVIEW, fileName: null });
+      continue;
+    }
+    lastMap.set(row.room_id, { author: row.author_name, body, fileName: row.file_name });
+  }
+
+  // Unread flag — one query with an EXISTS subselect per room. The viewer's
+  // member row always carries device_hash "owner:<userId>" (own rooms + DMs),
+  // so the join covers both room types. Messages count as unread when they are
+  // newer than COALESCE(last_read_at, member created_at), not deleted, not
+  // self-destructed yet, and were written by someone OTHER than this member
+  // (member_id differs; system events are ignored).
+  const unreadRows = await db.execute(sql`
+    select rm.room_id,
+      exists (
+        select 1 from messages m
+        where m.room_id = rm.room_id
+          and m.deleted_at is null
+          and m.author_role <> 'system'
+          and m.member_id is distinct from rm.id
+          and (m.expires_at is null or m.expires_at > now())
+          and m.created_at > coalesce(rm.last_read_at, rm.created_at)
+      ) as has_unread
+    from room_members rm
+    where rm.device_hash = ${hash}
+      and rm.room_id in (${sql.join(roomIds.map((id) => sql`${id}`), sql`, `)})`);
+  const unreadMap = new Map<string, boolean>();
+  for (const row of unreadRows.rows as unknown as Array<{ room_id: string; has_unread: boolean }>) {
+    unreadMap.set(row.room_id, Boolean(row.has_unread));
   }
 
   const counters = await roomCounters(roomIds.filter((id) => rows.find((r) => r.room.id === id)?.room.type !== "dm"));
@@ -400,6 +441,7 @@ export async function listDashboardChats(user: { id: string; displayName: string
       isLocked: room.isLocked,
       isDisabled: room.isDisabled,
       messagesCount: c?.messages ?? 0,
+      hasUnread: unreadMap.get(room.id) ?? false,
       lastMessage: lastMap.get(room.id) ?? null,
       lastActivityAt: room.lastActivityAt.toISOString(),
     } satisfies DashboardChat;

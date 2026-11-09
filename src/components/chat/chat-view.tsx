@@ -29,6 +29,8 @@ import {
 import { Avatar } from "@/components/brand";
 import { useI18n } from "@/components/i18n-provider";
 import { useHydrated } from "@/components/ui";
+import { EmojiPicker } from "@/components/chat/emoji-picker";
+import { GifPicker } from "@/components/chat/gif-picker";
 import type { ChatMessage, ChatSnapshot } from "@/lib/chat";
 import { errorText, formatDate, formatNumber } from "@/lib/i18n";
 import { cn, fmt } from "@/lib/utils";
@@ -99,6 +101,16 @@ export function ChatView({ endpoint, initial, maxLength, headerStart, headerActi
   const [uploading, setUploading] = useState(false);
   const [expiredFiles, setExpiredFiles] = useState<Set<string>>(new Set());
   const fileInputRef = useRef<HTMLInputElement>(null);
+  /* ---- Swipe-to-reply (touch): tracks one gesture at a time ---- */
+  const swipeRef = useRef<{ x: number; y: number; el: HTMLElement | null; locked: "h" | "v" | null; moved: number }>({
+    x: 0,
+    y: 0,
+    el: null,
+    locked: null,
+    moved: 0,
+  });
+  /** true right after a swipe — the follow-up tap must not toggle the toolbar */
+  const suppressClickRef = useRef(false);
 
   /* ---- E2EE (§4.1): keys fetched per conversation, unlocked per session ---- */
   const roomId = initial.room.id;
@@ -212,7 +224,11 @@ export function ChatView({ endpoint, initial, maxLength, headerStart, headerActi
       busy = true;
       let next = document.hidden ? 8000 : 2000;
       try {
-        const res = await fetch(`${endpoint}?after=${lastIdRef.current}&v=${versionRef.current}`, { cache: "no-store" });
+        // Mark-as-read rides along on every visible poll (initial load included);
+        // hidden tabs must NOT clear unread flags — the notify runtime and the
+        // chat-list unread dots rely on them.
+        const read = document.visibilityState === "visible" ? "&read=1" : "";
+        const res = await fetch(`${endpoint}?after=${lastIdRef.current}&v=${versionRef.current}${read}`, { cache: "no-store" });
         if ([401, 403, 404, 503].includes(res.status)) {
           const data = (await res.json().catch(() => ({}))) as { error?: string };
           stopped = true;
@@ -352,6 +368,56 @@ export function ChatView({ endpoint, initial, maxLength, headerStart, headerActi
       setUploading(false);
       requestAnimationFrame(() => inputRef.current?.focus());
     }
+  };
+
+  /**
+   * Sends a GIF message — mirrors the text-send fetch/headers (after/v params
+   * included) but the body only carries {gifId}; the API rejects GIFs for
+   * guests and E2EE rooms, so the trigger is gated to authenticated members
+   * of non-E2EE conversations (see the composer).
+   */
+  const sendGif = async (gifId: string) => {
+    if (sending) return;
+    setSending(true);
+    setError(null);
+    try {
+      const res = await fetch(endpoint, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ gifId, replyToId: replyTo?.id ?? null, after: lastIdRef.current, v: versionRef.current }),
+      });
+      const data = (await res.json().catch(() => ({}))) as ChatSnapshot & { error?: string };
+      if (!res.ok) {
+        const code = data.error ?? "generic";
+        if (res.status === 401 || res.status === 404 || res.status === 503 || (res.status === 403 && !["roomLocked", "unauthorized"].includes(code))) {
+          setLost(code);
+        } else {
+          setError(code);
+        }
+        return;
+      }
+      setReplyTo(null);
+      atBottomRef.current = true;
+      apply(data);
+    } catch {
+      setError("network");
+    } finally {
+      setSending(false);
+      requestAnimationFrame(() => inputRef.current?.focus());
+    }
+  };
+
+  /** Inserts a picked emoji at the caret (falls back to append). */
+  const insertEmoji = (emoji: string) => {
+    const el = inputRef.current;
+    const start = el?.selectionStart ?? draft.length;
+    const end = el?.selectionEnd ?? draft.length;
+    setDraft(draft.slice(0, start) + emoji + draft.slice(end));
+    requestAnimationFrame(() => {
+      el?.focus();
+      const pos = start + emoji.length;
+      el?.setSelectionRange(pos, pos);
+    });
   };
 
   const remove = async (m: ChatMessage) => {
@@ -618,12 +684,68 @@ export function ChatView({ endpoint, initial, maxLength, headerStart, headerActi
                     <div
                       role="button"
                       tabIndex={0}
-                      onClick={() => setActiveId(active ? null : m.id)}
+                      /* Swipe-to-reply: a horizontal drag nudges the bubble sideways and
+                         ≥72px of committed movement (either direction — works in RTL and
+                         LTR alike) starts a reply. Vertical scrolling stays native
+                         (touch-action: pan-y); nothing is ever preventDefault-ed. */
+                      onClick={() => {
+                        // A swipe just ended — swallow the trailing synthetic tap.
+                        if (suppressClickRef.current) {
+                          suppressClickRef.current = false;
+                          return;
+                        }
+                        setActiveId(active ? null : m.id);
+                      }}
                       onKeyDown={(e) => {
                         if (e.key === "Enter" || e.key === " ") {
                           e.preventDefault();
                           setActiveId(active ? null : m.id);
                         }
+                      }}
+                      style={{ touchAction: "pan-y" }}
+                      onTouchStart={(e) => {
+                        const t = e.touches[0];
+                        swipeRef.current = { x: t.clientX, y: t.clientY, el: e.currentTarget, locked: null, moved: 0 };
+                      }}
+                      onTouchMove={(e) => {
+                        const s = swipeRef.current;
+                        if (!s.el) return;
+                        const t = e.touches[0];
+                        const dx = t.clientX - s.x;
+                        const dy = t.clientY - s.y;
+                        if (!s.locked) {
+                          if (Math.abs(dx) > 12 && Math.abs(dx) > 2 * Math.abs(dy)) s.locked = "h";
+                          else if (Math.abs(dy) > 12) s.locked = "v";
+                        }
+                        if (s.locked === "h") {
+                          s.moved = dx;
+                          const c = Math.max(-90, Math.min(90, dx)) * 0.35;
+                          s.el.style.transition = "none";
+                          s.el.style.transform = `translateX(${c}px)`;
+                        }
+                      }}
+                      onTouchEnd={() => {
+                        const s = swipeRef.current;
+                        if (s.el) {
+                          s.el.style.transition = "transform .18s ease";
+                          s.el.style.transform = "";
+                        }
+                        // The Reply ToolButton is unconditional for message bubbles,
+                        // so every bubble is swipe-replyable.
+                        if (s.locked === "h" && Math.abs(s.moved) >= 72) startReply(m);
+                        if (Math.abs(s.moved) > 10) suppressClickRef.current = true;
+                        s.locked = null;
+                        s.moved = 0;
+                      }}
+                      onTouchCancel={() => {
+                        const s = swipeRef.current;
+                        if (s.el) {
+                          s.el.style.transition = "transform .18s ease";
+                          s.el.style.transform = "";
+                        }
+                        if (Math.abs(s.moved) > 10) suppressClickRef.current = true;
+                        s.locked = null;
+                        s.moved = 0;
                       }}
                       className={cn(
                         "bubble cursor-default text-start outline-none transition-shadow",
@@ -645,7 +767,9 @@ export function ChatView({ endpoint, initial, maxLength, headerStart, headerActi
                             {m.replyTo.authorName || "—"}
                           </span>
                           <span className="line-clamp-2 opacity-80" dir="auto">
-                            {m.replyTo.deleted ? t.chat.deletedMessage : m.replyTo.body}
+                            {/* A live (non-deleted) quote with an empty preview body can only be a
+                                GIF message — text carries a body, files render "📎 name". */}
+                            {m.replyTo.deleted ? t.chat.deletedMessage : m.replyTo.body || "GIF"}
                           </span>
                         </span>
                       ) : null}
@@ -694,6 +818,13 @@ export function ChatView({ endpoint, initial, maxLength, headerStart, headerActi
                         return (
                           <>
                             {m.file ? <FileBubble m={m} expired={expiredFiles.has(m.file.id)} onExpired={() => setExpiredFiles((prev) => new Set(prev).add(m.file!.id))} /> : null}
+                            {m.gifId ? (
+                              // GIFs never ride along with text or files (the API rejects both
+                              // combos) and stream through the same-origin proxy, so CSP
+                              // img-src stays 'self'.
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <img src={`/api/gifs/media/${m.gifId}`} alt="GIF" loading="lazy" className="max-w-[min(280px,70vw)] rounded-xl" />
+                            ) : null}
                             {m.body ? (
                               <p dir="auto" className="whitespace-pre-wrap">
                                 {linkify(m.body)}
@@ -768,7 +899,7 @@ export function ChatView({ endpoint, initial, maxLength, headerStart, headerActi
               <div className="min-w-0 flex-1">
                 <p className="text-xs font-extrabold text-accent-ink">{fmt(t.chat.replyingTo, { name: replyTo.authorName })}</p>
                 <p className="truncate text-xs text-muted" dir="auto">
-                  {replyTo.body || replyTo.file?.name}
+                  {replyTo.body || replyTo.file?.name || (replyTo.gifId ? "GIF" : "")}
                 </p>
               </div>
               <button type="button" onClick={() => setReplyTo(null)} className="btn btn-ghost btn-icon btn-sm" aria-label={t.chat.cancelReply}>
@@ -855,6 +986,7 @@ export function ChatView({ endpoint, initial, maxLength, headerStart, headerActi
                   else if (error === "fileTooBig") setError(null);
                 }}
               />
+              <EmojiPicker onPick={insertEmoji} />
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
@@ -865,6 +997,10 @@ export function ChatView({ endpoint, initial, maxLength, headerStart, headerActi
               >
                 <Paperclip className="size-[18px]" />
               </button>
+              {/* GIFs: authenticated members of non-E2EE rooms only (API-side rule mirrored here). */}
+              {me.role !== "guest" && !room.e2eeEnabled ? (
+                <GifPicker onPick={(gifId) => void sendGif(gifId)} disabled={sending} />
+              ) : null}
               <select
                 value={ttlChoice}
                 onChange={(e) => setTtlChoice(e.target.value)}

@@ -76,3 +76,18 @@ export async function telegramBotDmAction(_prev: ActionState, formData: FormData
   revalidatePath("/dashboard/settings");
   return { ok: true, message: enabled ? "account.tgBotDmOn" : "account.tgBotDmOff" };
 }
+
+/** Offline notify toggle: a digest ping after 15 minutes away (§5.5). */
+export async function telegramOfflineNotifyAction(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  const user = await getCurrentUser();
+  if (!user) return { error: "unauthorized" };
+  const enabled = formData.get("enabled") === "1";
+  const updated = await db
+    .update(telegramLinks)
+    .set({ offlineNotify: enabled, updatedAt: new Date() })
+    .where(eq(telegramLinks.userId, user.id))
+    .returning({ id: telegramLinks.id });
+  if (updated.length === 0) return { error: "telegramNotLinked" };
+  revalidatePath("/dashboard/settings");
+  return { ok: true, message: enabled ? "account.tgOfflineNotifyOn" : "account.tgOfflineNotifyOff" };
+}

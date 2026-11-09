@@ -2,6 +2,7 @@ import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { platformSettings } from "@/db/schema";
 import { getSettings } from "../settings";
+import { sweepOfflineNotifications } from "./offline-notify";
 import { getPlatformBot, recordPlatformBotError, tg, TelegramError } from "./platform";
 import { BOT_COMMANDS, handleUpdate, type TgUpdate } from "./service";
 import { registerAdminCommands, tryHandleSuperadmin } from "./superadmin";
@@ -17,7 +18,7 @@ type PollerState = { loop: Loop | null; syncing: boolean; startedAt: number };
 
 const OFFSET_KEY = "pc_tg_last_update_id";
 
-const g = globalThis as typeof globalThis & { __pcPoller?: PollerState; __pcPollerSync?: () => void };
+const g = globalThis as typeof globalThis & { __pcPoller?: PollerState; __pcPollerSync?: () => void; __pcOfflineSweep?: boolean };
 
 function unref(timer: unknown) {
   (timer as { unref?: () => void })?.unref?.();
@@ -33,9 +34,27 @@ function sleep(ms: number, signal: AbortSignal) {
   });
 }
 
+/**
+ * Offline-notify sweep (§5.5): every 5 minutes, in the SAME periodic system
+ * as the poller loop — no second poller. It runs even when polling is disabled
+ * (webhook deployments) because it only makes outbound sendMessage calls and
+ * never consumes Telegram updates.
+ */
+function ensureOfflineNotifySweep() {
+  if (g.__pcOfflineSweep) return;
+  g.__pcOfflineSweep = true;
+  unref(
+    setInterval(() => {
+      void sweepOfflineNotifications().catch((error) => console.error("[panda-chat] offline notify sweep failed", error));
+    }, 5 * 60_000),
+  );
+}
+
 export function ensurePoller() {
+  if (process.env.NEXT_PHASE === "phase-production-build") return;
+  ensureOfflineNotifySweep();
   if (g.__pcPoller) return;
-  if (process.env.NEXT_PHASE === "phase-production-build" || process.env.TELEGRAM_POLLING === "off") return;
+  if (process.env.TELEGRAM_POLLING === "off") return;
   const state: PollerState = { loop: null, syncing: false, startedAt: Date.now() };
   g.__pcPoller = state;
   g.__pcPollerSync = () => void sync(state);
