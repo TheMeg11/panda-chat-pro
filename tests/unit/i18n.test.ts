@@ -55,6 +55,8 @@ const KEYS_TO_CHECK = [
   "account.tgOfflineNotifyHint",
   "account.tgOfflineNotifyOn",
   "account.tgOfflineNotifyOff",
+  "gif.unconfigured",
+  "gif.invalidKey",
 ];
 
 describe("i18n dictionaries (fa/en parity for new features)", () => {

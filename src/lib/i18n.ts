@@ -487,6 +487,8 @@ const en = {
     error: "Couldn't load GIFs; try again shortly.",
     empty: "No results found.",
     by: "GIFs by GIPHY",
+    unconfigured: "GIF service is not configured. The site admin must set the GIPHY_API_KEY on the server.",
+    invalidKey: "The GIF API key is invalid; the admin should check GIPHY_API_KEY.",
   },
   admin: {
     title: "Super Admin",
@@ -1414,6 +1416,8 @@ const fa: Dict = {
     error: "خطا در دریافت GIFها؛ کمی بعد دوباره تلاش کنید.",
     empty: "نتیجه‌ای پیدا نشد.",
     by: "GIFها از GIPHY",
+    unconfigured: "سرویس گیف فعال نیست. مدیر سایت باید کلید GIPHY_API_KEY را در تنظیمات سرور وارد کند.",
+    invalidKey: "کلید سرویس گیف نامعتبر است؛ مدیر باید کلید GIPHY_API_KEY را بررسی کند.",
   },
   admin: {
     title: "مدیر کل",

@@ -120,5 +120,8 @@ instead of being faked.
   outside Telegram.
 - `WEBHOOK_SECRET` (min 16 chars) gates `/api/telegram/webhook/platform`;
   without it the route answers 403.
+- `GIPHY_API_KEY` – optional: Giphy API key for the GIF picker (get a free key
+  at developers.giphy.com); there is no keyless fallback, so without a valid
+  key the picker degrades gracefully with an actionable message.
 - Tokens are never rendered in the admin UI (masked hints only) and never
   logged.

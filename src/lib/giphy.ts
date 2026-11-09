@@ -7,31 +7,37 @@ import { platformSettings } from "@/db/schema";
  *
  * GIF bytes are never served to the browser straight from giphy.com: the client
  * renders them through /api/gifs/media/<id> (same-origin, CSP-safe). The API
- * key comes from the GIPHY_API_KEY env var, or the platform_settings override
- * (`pc_giphy_key`, set by the Super Admin), or Giphy's public beta key.
+ * key comes from the GIPHY_API_KEY env var or the platform_settings override
+ * (`pc_giphy_key`, set by the Super Admin). There is no keyless fallback: when
+ * no key is configured, search degrades gracefully with an actionable
+ * "unconfigured" reason instead of a generic error.
  */
 
 const SETTINGS_KEY = "pc_giphy_key";
-/** Giphy public beta key — works for low-volume search traffic. */
-const FALLBACK_KEY = "dc6zaTOxFJmzC";
 
 /** Giphy media ids: letters, digits, dash, underscore. */
 export const GIF_ID_RE = /^[A-Za-z0-9_-]{3,64}$/;
 
 const g = globalThis as typeof globalThis & {
-  __pcGiphyKey?: { value: string; at: number };
+  __pcGiphyKey?: { value: string | null; at: number };
   __pcGiphyCache?: Map<string, { at: number; gifs: GifThumb[] }>;
 };
 
 export type GifThumb = { id: string; title: string };
 
-/** Resolves the active Giphy API key (env → platform settings → public beta). */
-export async function giphyKey(): Promise<string> {
+/** Typed search outcome — each failure reason maps to a specific, actionable
+ * message in the picker instead of a generic "couldn't load" error. */
+export type GifSearchResult =
+  | { ok: true; gifs: GifThumb[] }
+  | { ok: false; reason: "unconfigured" | "invalid-key" | "network" };
+
+/** Resolves the active Giphy API key (env → platform settings → null). */
+export async function giphyKey(): Promise<string | null> {
   const env = process.env.GIPHY_API_KEY?.trim();
   if (env) return env;
   const cached = g.__pcGiphyKey;
   if (cached && Date.now() - cached.at < 30_000) return cached.value;
-  let value = FALLBACK_KEY;
+  let value: string | null = null;
   try {
     const [row] = await db.select().from(platformSettings).where(eq(platformSettings.key, SETTINGS_KEY)).limit(1);
     const stored = row?.value as { key?: string } | string | undefined;
@@ -44,25 +50,46 @@ export async function giphyKey(): Promise<string> {
   return value;
 }
 
-/** In-memory search cache: 60s TTL, ~100 entries max. */
+/** In-memory search cache: 60s TTL, ~100 entries max (ok results only). */
 const cache: Map<string, { at: number; gifs: GifThumb[] }> = g.__pcGiphyCache ?? (g.__pcGiphyCache = new Map());
 const CACHE_TTL = 60_000;
 const CACHE_MAX = 100;
 
-/** Searches Giphy and returns simplified {id, title} thumbnails. */
-export async function searchGifs(q: string, limit = 16): Promise<GifThumb[]> {
+/**
+ * Searches Giphy and returns simplified {id, title} thumbnails, or a typed
+ * failure: no key configured ("unconfigured"), key rejected with 401/403
+ * ("invalid-key"), or timeout / other non-200 / unparsable body
+ * ("network"). Only ok results are cached.
+ */
+export async function searchGifs(q: string, limit = 16): Promise<GifSearchResult> {
   const bounded = Math.min(50, Math.max(1, Math.floor(limit) || 16));
   const key = `${q}\u0000${bounded}`;
   const hit = cache.get(key);
-  if (hit && Date.now() - hit.at < CACHE_TTL) return hit.gifs;
+  if (hit && Date.now() - hit.at < CACHE_TTL) return { ok: true, gifs: hit.gifs };
 
   const apiKey = await giphyKey();
+  if (!apiKey) return { ok: false, reason: "unconfigured" };
+
   const url =
     `https://api.giphy.com/v1/gifs/search?api_key=${encodeURIComponent(apiKey)}` +
     `&q=${encodeURIComponent(q)}&limit=${bounded}&rating=pg&lang=fa`;
-  const res = await fetch(url, { signal: AbortSignal.timeout(8_000), cache: "no-store" });
-  if (!res.ok) throw new Error(`giphy search HTTP ${res.status}`);
-  const data = (await res.json()) as { data?: Array<{ id?: string; title?: string }> };
+  let res: Response;
+  try {
+    res = await fetch(url, { signal: AbortSignal.timeout(8_000), cache: "no-store" });
+  } catch {
+    /* timeout, DNS, connection refused, … */
+    return { ok: false, reason: "network" };
+  }
+  if (res.status === 401 || res.status === 403) return { ok: false, reason: "invalid-key" };
+  if (!res.ok) return { ok: false, reason: "network" };
+
+  let data: { data?: Array<{ id?: string; title?: string }> };
+  try {
+    data = (await res.json()) as { data?: Array<{ id?: string; title?: string }> };
+  } catch {
+    /* non-JSON body */
+    return { ok: false, reason: "network" };
+  }
   const gifs = (data.data ?? [])
     .filter((item) => typeof item.id === "string" && GIF_ID_RE.test(item.id))
     .map((item) => ({
@@ -72,7 +99,7 @@ export async function searchGifs(q: string, limit = 16): Promise<GifThumb[]> {
 
   if (cache.size >= CACHE_MAX) cache.clear();
   cache.set(key, { at: Date.now(), gifs });
-  return gifs;
+  return { ok: true, gifs };
 }
 
 export type GifMedia = { stream: ReadableStream<Uint8Array>; contentType: string };

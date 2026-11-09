@@ -6,6 +6,8 @@ import { useI18n } from "@/components/i18n-provider";
 
 type Props = { onPick: (gifId: string) => void; disabled?: boolean };
 type GifThumb = { id: string; title: string };
+/** /api/gifs/search payload: results, or a typed degradation reason. */
+type SearchResponse = { gifs?: GifThumb[]; error?: "unconfigured" | "invalid-key" | "network" };
 
 const DEBOUNCE_MS = 400;
 
@@ -14,6 +16,8 @@ const DEBOUNCE_MS = 400;
  * 400ms debounce, previews streamed through the same-origin media proxy
  * (?variant=small downsized rendition). SELECTS only: the parent does the
  * sending. Authenticated members of non-E2EE rooms only (parent gates this).
+ * Degrades gracefully: "unconfigured"/"invalid-key" answers show a specific
+ * actionable message; "network" keeps the generic retry hint.
  */
 export function GifPicker({ onPick, disabled }: Props) {
   const { t } = useI18n();
@@ -22,6 +26,7 @@ export function GifPicker({ onPick, disabled }: Props) {
   const [gifs, setGifs] = useState<GifThumb[]>([]);
   const [loading, setLoading] = useState(false);
   const [failed, setFailed] = useState(false);
+  const [configError, setConfigError] = useState<"unconfigured" | "invalid-key" | null>(null);
   const timerRef = useRef<number | undefined>(undefined);
 
   /* Stop any pending debounce when the picker unmounts. */
@@ -31,12 +36,22 @@ export function GifPicker({ onPick, disabled }: Props) {
     try {
       const res = await fetch(`/api/gifs/search?q=${encodeURIComponent(query)}`);
       if (!res.ok) throw new Error(String(res.status));
-      const data = (await res.json()) as { gifs?: GifThumb[] };
+      const data = (await res.json()) as SearchResponse;
+      if (data.error === "unconfigured" || data.error === "invalid-key") {
+        /* Specific, actionable message for the site admin — not a generic failure. */
+        setGifs([]);
+        setFailed(false);
+        setConfigError(data.error);
+        return;
+      }
+      if (data.error === "network") throw new Error(data.error);
       setGifs(data.gifs ?? []);
       setFailed(false);
+      setConfigError(null);
     } catch {
       setGifs([]);
       setFailed(true);
+      setConfigError(null);
     } finally {
       setLoading(false);
     }
@@ -51,6 +66,7 @@ export function GifPicker({ onPick, disabled }: Props) {
       setGifs([]);
       setLoading(false);
       setFailed(false);
+      setConfigError(null);
       return;
     }
     setLoading(true);
@@ -101,6 +117,10 @@ export function GifPicker({ onPick, disabled }: Props) {
                 </div>
               ) : failed ? (
                 <p className="px-2 py-6 text-center text-sm text-rose-ink">{t.gif.error}</p>
+              ) : configError === "unconfigured" ? (
+                <p className="px-2 py-6 text-center text-sm text-muted">{t.gif.unconfigured}</p>
+              ) : configError === "invalid-key" ? (
+                <p className="px-2 py-6 text-center text-sm text-muted">{t.gif.invalidKey}</p>
               ) : gifs.length === 0 ? (
                 <p className="px-2 py-6 text-center text-sm text-muted">{t.gif.empty}</p>
               ) : (

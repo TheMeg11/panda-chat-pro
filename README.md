@@ -66,6 +66,7 @@ See `.env.example` for the full annotated list. Highlights:
 | `IP_RETENTION_DAYS`      | –        | Session IP/UA retention before blanking (default 30)         |
 | `E2EE_ENABLED`           | –        | Feature flag for DM encryption (default on, per-chat opt-in) |
 | `CSP_REPORT_ONLY`        | –        | Pilot the CSP in Report-Only mode before enforcing           |
+| `GIPHY_API_KEY`          | –        | Optional: Giphy API key for the GIF picker (get a free key at developers.giphy.com) |
 
 ## Tests & CI
 
