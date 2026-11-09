@@ -122,7 +122,7 @@ and all strings resolve in both languages.
 | Step | Result |
 |------|--------|
 | Token authentication | ✅ The provided token authenticates against `api.railway.com` (account `golmamad11@outlook.com`). |
-| Locate project `fearless-wisdom` / service `anonchat` | ❌ **Not Completed — blocked.** `projects` returns an **empty list** for this token and `project("fearless-wisdom")` → "Project not found". The token provided in the mission brief contains a literal `xxx` segment (`rlwy_acct_…nbOxxxGMIG…`), i.e. it appears truncated/redacted; whatever account it resolves to has **no access** to the `fearless-wisdom` project. |
+| Locate project `fearless-wisdom` / service `anonchat` | ❌ **Not Completed — blocked.** `projects` returns an **empty list** for this token and `project("fearless-wisdom")` → "Project not found". The token provided in the mission brief appears truncated/redacted (it contains a literal `xxx` segment); whatever account it resolves to has **no access** to the `fearless-wisdom` project. |
 | Deploy / env vars / migrations / logs / health check of the new version | ⛔ Could not be performed via API for the same reason. |
 | Existing production health | ✅ `https://chat.kanar.ir/api/health` → `{"ok":true}` (HTTP 200) — the **old** version is alive. |
 | Auto-deploy check | Polled `/api/chats` (new-only route) on the public URL after the push: still 404 at report time → either auto-deploy is not wired to this repo/branch or the build had not finished. **Not verified — no false success claimed.** |
