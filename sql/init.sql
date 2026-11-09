@@ -173,9 +173,8 @@ CREATE TABLE IF NOT EXISTS deleted_accounts (
   deleted_at timestamptz NOT NULL DEFAULT now()
 );
 
--- Telegram links: per-user fallback destination + bot-DM consent.
-ALTER TABLE telegram_links ADD COLUMN IF NOT EXISTS fallback_room_id uuid REFERENCES rooms(id) ON DELETE SET NULL;
-ALTER TABLE telegram_links ADD COLUMN IF NOT EXISTS allow_bot_dm boolean NOT NULL DEFAULT false;
+-- (telegram_links fallback_room_id / allow_bot_dm columns are added AFTER the
+-- telegram_links table is created below — forward references break empty DBs.)
 
 CREATE TABLE IF NOT EXISTS telegram_bots (
   room_id uuid PRIMARY KEY REFERENCES rooms(id) ON DELETE CASCADE,
@@ -230,6 +229,11 @@ CREATE TABLE IF NOT EXISTS telegram_links (
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS telegram_links_user_idx ON telegram_links (user_id);
+
+-- Telegram links: per-user fallback destination + bot-DM consent.
+-- (Must come AFTER CREATE TABLE telegram_links above so this is valid on an empty DB.)
+ALTER TABLE telegram_links ADD COLUMN IF NOT EXISTS fallback_room_id uuid REFERENCES rooms(id) ON DELETE SET NULL;
+ALTER TABLE telegram_links ADD COLUMN IF NOT EXISTS allow_bot_dm boolean NOT NULL DEFAULT false;
 
 -- Short-lived /start <code> pairing codes (browser -> Telegram).
 CREATE TABLE IF NOT EXISTS telegram_link_codes (
