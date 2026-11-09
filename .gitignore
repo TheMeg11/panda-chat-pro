@@ -1,0 +1,26 @@
+# dependencies
+node_modules/
+
+# next.js build output
+.next/
+out/
+tsconfig.tsbuildinfo
+next-env.d.ts.bak
+
+# environment & secrets — NEVER commit
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+
+# logs & OS noise
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db
+
+# local databases / backups
+*.sqlite
+*.db
+backups/
