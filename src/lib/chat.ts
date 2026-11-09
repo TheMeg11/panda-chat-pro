@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { messages, roomMembers, rooms, files, type Message, type Room } from "@/db/schema";
 
@@ -21,6 +21,10 @@ export type ChatMessage = {
   canDelete: boolean;
   file: ChatFile | null;
   replyTo: { id: number; authorName: string; body: string; deleted: boolean } | null;
+  /** true when body is an E2EE envelope the server cannot read */
+  encrypted: boolean;
+  /** self-destruct deadline (ISO) — the row vanishes from feeds once passed */
+  expiresAt: string | null;
 };
 
 export type ChatRoomInfo = {
@@ -31,6 +35,10 @@ export type ChatRoomInfo = {
   hasPassword: boolean;
   memberCount: number;
   onlineCount: number;
+  /** E2EE enabled on this conversation (DMs only) */
+  e2eeEnabled: boolean;
+  /** default self-destruct TTL in seconds (null = off) */
+  defaultTtl: number | null;
   /** Optional header subtitle override (e.g. "@username" for 1:1 chats) */
   subtitle?: string;
   /** true for 1:1 chats — renders round avatars and hides member/online counts */
@@ -60,13 +68,16 @@ export async function buildSnapshot(
   roomOverride?: ChatRoomOverride,
 ): Promise<ChatSnapshot> {
   const reset = afterId <= 0 || clientVersion === null || clientVersion !== room.stateVersion;
+  // Self-destructing messages are filtered at READ time so an expired row is
+  // never served even between maintenance sweeps.
+  const notExpired = or(isNull(messages.expiresAt), gt(messages.expiresAt, new Date()));
   let rows: Message[];
   if (reset) {
     rows = (
       await db
         .select()
         .from(messages)
-        .where(and(eq(messages.roomId, room.id), isNull(messages.deletedAt)))
+        .where(and(eq(messages.roomId, room.id), isNull(messages.deletedAt), notExpired))
         .orderBy(desc(messages.id))
         .limit(WINDOW)
     ).reverse();
@@ -74,7 +85,7 @@ export async function buildSnapshot(
     rows = await db
       .select()
       .from(messages)
-      .where(and(eq(messages.roomId, room.id), isNull(messages.deletedAt), gt(messages.id, afterId)))
+      .where(and(eq(messages.roomId, room.id), isNull(messages.deletedAt), notExpired, gt(messages.id, afterId)))
       .orderBy(asc(messages.id))
       .limit(200);
   }
@@ -116,6 +127,8 @@ export async function buildSnapshot(
       hasPassword: Boolean(room.passwordHash),
       memberCount: counts?.total ?? 0,
       onlineCount: counts?.online ?? 0,
+      e2eeEnabled: room.e2eeEnabled,
+      defaultTtl: room.defaultTtl ?? null,
       ...(roomOverride ?? {}),
     },
     me: viewer,
@@ -140,6 +153,8 @@ function serialize(r: Message, viewer: Viewer, replies: Map<number, NonNullable<
         ? { id: r.fileId, name: r.fileName, mime: r.fileMime, size: r.fileSize }
         : null,
     replyTo: r.replyToId ? (replies.get(r.replyToId) ?? { id: r.replyToId, authorName: "", body: "", deleted: true }) : null,
+    encrypted: r.encrypted ?? false,
+    expiresAt: r.expiresAt ? r.expiresAt.toISOString() : null,
   };
 }
 
@@ -167,6 +182,7 @@ export async function postMessage(
   replyToId: number | null,
   source: "web" | "telegram",
   fileId: string | null = null,
+  opts: { ttlSeconds?: number | null; encrypted?: boolean } = {},
 ): Promise<Message> {
   let replyId: number | null = null;
   if (replyToId && Number.isSafeInteger(replyToId) && replyToId > 0) {
@@ -200,6 +216,8 @@ export async function postMessage(
       body,
       replyToId: replyId,
       ...(fileMeta ? { fileId, fileName: fileMeta.name, fileMime: fileMeta.mime, fileSize: fileMeta.size } : {}),
+      ...(opts.ttlSeconds ? { expiresAt: new Date(Date.now() + opts.ttlSeconds * 1000) } : {}),
+      ...(opts.encrypted ? { encrypted: true } : {}),
     })
     .returning();
   await db.update(rooms).set({ lastActivityAt: new Date() }).where(eq(rooms.id, room.id));

@@ -15,6 +15,8 @@ import {
   LockKeyhole,
   Music,
   Paperclip,
+  Timer,
+  Unlock,
   Reply,
   Send,
   SendHorizontal,
@@ -30,6 +32,17 @@ import { useHydrated } from "@/components/ui";
 import type { ChatMessage, ChatSnapshot } from "@/lib/chat";
 import { errorText, formatDate, formatNumber } from "@/lib/i18n";
 import { cn, fmt } from "@/lib/utils";
+import { useLocalFlag } from "@/lib/local-store";
+import {
+  cacheUnlocked,
+  decryptFile,
+  decryptMessage,
+  encryptFile,
+  encryptMessage,
+  getUnlocked,
+  unwrapPrivateKey,
+  type E2eeIdentity,
+} from "@/lib/e2ee-client";
 
 type Props = {
   endpoint: string;
@@ -87,6 +100,18 @@ export function ChatView({ endpoint, initial, maxLength, headerStart, headerActi
   const [expiredFiles, setExpiredFiles] = useState<Set<string>>(new Set());
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  /* ---- E2EE (§4.1): keys fetched per conversation, unlocked per session ---- */
+  const roomId = initial.room.id;
+  const [e2eeIdentity, setE2eeIdentity] = useState<{ me: E2eeIdentity | null; peer: { publicKeyJwk: string } | null } | null>(null);
+  const [e2eeUnlocked, setE2eeUnlocked] = useState(() => Boolean(getUnlocked(roomId)));
+  const [e2eePassword, setE2eePassword] = useState("");
+  const [e2eeError, setE2eeError] = useState<string | null>(null);
+  const [plainBodies, setPlainBodies] = useState<Map<number, string>>(new Map());
+
+  /* ---- Self-destruct (§4.2) & watermark (§4.11) ---- */
+  const [ttlChoice, setTtlChoice] = useState<string>("default");
+  const watermark = useLocalFlag("pc-watermark");
+
   const versionRef = useRef(initial.stateVersion);
   const lastIdRef = useRef(lastId(initial.messages));
   const listRef = useRef<HTMLDivElement>(null);
@@ -109,6 +134,69 @@ export function ChatView({ endpoint, initial, maxLength, headerStart, headerActi
       lastIdRef.current = Math.max(lastIdRef.current, lastId(snap.messages));
     }
   }, []);
+
+  /* Fetch E2EE key material for this conversation (DM only, session-scoped). */
+  useEffect(() => {
+    if (!initial.room.direct) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch(`/api/rooms/${roomId}/e2ee`, { cache: "no-store" });
+        if (!res.ok) return;
+        const data = (await res.json()) as {
+          e2eeEnabled: boolean;
+          me: E2eeIdentity | null;
+          peer: { publicKeyJwk: string } | null;
+        };
+        if (cancelled) return;
+        setE2eeIdentity({ me: data.me, peer: data.peer });
+      } catch {
+        /* offline */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [roomId, initial.room.direct]);
+
+  /* Decrypt incoming E2EE envelopes with the unlocked private key. */
+  useEffect(() => {
+    if (!room.e2eeEnabled || !e2eeUnlocked) return;
+    const unlocked = getUnlocked(roomId);
+    if (!unlocked) return;
+    const targets = messages.filter((m) => m.encrypted && !plainBodies.has(m.id));
+    if (targets.length === 0) return;
+    void (async () => {
+      const updates = new Map<number, string>();
+      for (const m of targets) {
+        try {
+          updates.set(m.id, await decryptMessage(unlocked.privateKey, unlocked.peerPublicKeyJwk, roomId, m.body));
+        } catch {
+          updates.set(m.id, ""); // undecryptable — show a locked placeholder
+        }
+      }
+      setPlainBodies((prev) => {
+        const next = new Map(prev);
+        for (const [k, v] of updates) next.set(k, v);
+        return next;
+      });
+    })();
+  }, [messages, room.e2eeEnabled, e2eeUnlocked, roomId, plainBodies]);
+
+  /** Unlocks the E2EE private key with the account password (browser-side only). */
+  const unlockE2ee = async () => {
+    if (!e2eeIdentity?.me || !e2eeIdentity.peer) return;
+    setE2eeError(null);
+    try {
+      const peerJwk = JSON.parse(e2eeIdentity.peer.publicKeyJwk) as JsonWebKey;
+      const privateKey = await unwrapPrivateKey(e2eeIdentity.me, e2eePassword);
+      cacheUnlocked(roomId, privateKey, peerJwk);
+      setE2eeUnlocked(true);
+      setE2eePassword("");
+    } catch {
+      setE2eeError("e2eeUnlockFailed");
+    }
+  };
 
   /* Polling loop — adaptive (2s visible, 8s hidden), stops when access changes. */
   useEffect(() => {
@@ -190,17 +278,38 @@ export function ChatView({ endpoint, initial, maxLength, headerStart, headerActi
   };
 
   const send = async () => {
-    const body = draft.trim();
-    if ((!body && !pendingFile) || sending) return;
-    if (body.length > maxLength) return setError("messageTooLong");
+    const rawBody = draft.trim();
+    if ((!rawBody && !pendingFile) || sending) return;
+    if (rawBody.length > maxLength) return setError("messageTooLong");
     setSending(true);
     setError(null);
     try {
+      // E2EE conversations: encrypt BEFORE anything leaves the browser (§4.1).
+      const unlocked = room.e2eeEnabled ? getUnlocked(roomId) : null;
+      if (room.e2eeEnabled && !unlocked) {
+        setE2eeError("e2eeUnlockFailed");
+        return;
+      }
+
+      let body = rawBody;
       let fileId: string | null = null;
+      let fileIv: string | null = null;
+      let fileName: string | null = null;
+      let fileMime: string | null = null;
       if (pendingFile) {
         setUploading(true);
+        let uploadBlob: Blob = pendingFile;
+        if (unlocked) {
+          // Encrypt the file bytes with the conversation key; metadata travels
+          // inside the encrypted message body, never in the clear.
+          const enc = await encryptFile(unlocked.privateKey, unlocked.peerPublicKeyJwk, roomId, await pendingFile.arrayBuffer());
+          uploadBlob = enc.blob;
+          fileIv = enc.iv;
+        }
+        fileName = pendingFile.name;
+        fileMime = pendingFile.type || "application/octet-stream";
         const form = new FormData();
-        form.append("file", pendingFile);
+        form.append("file", new File([uploadBlob], unlocked ? "encrypted.bin" : pendingFile.name, { type: unlocked ? "application/octet-stream" : pendingFile.type }));
         const upRes = await fetch(endpoint.replace(/\/messages$/, "/files"), { method: "POST", body: form });
         const upData = (await upRes.json().catch(() => ({}))) as { id?: string; error?: string };
         if (!upRes.ok || !upData.id) {
@@ -210,10 +319,16 @@ export function ChatView({ endpoint, initial, maxLength, headerStart, headerActi
         fileId = upData.id;
         setUploading(false);
       }
+      if (unlocked) {
+        const payload = { text: body, ...(fileIv ? { file: { name: fileName, mime: fileMime, iv: fileIv } } : {}) };
+        body = await encryptMessage(unlocked.privateKey, unlocked.peerPublicKeyJwk, roomId, JSON.stringify(payload));
+      }
+      // Self-destruct: per-send override, else the conversation default (§4.2).
+      const ttl = ttlChoice === "default" ? undefined : ttlChoice === "off" ? 0 : Number(ttlChoice);
       const res = await fetch(endpoint, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ body, fileId, replyToId: replyTo?.id ?? null, after: lastIdRef.current, v: versionRef.current }),
+        body: JSON.stringify({ body, fileId, replyToId: replyTo?.id ?? null, after: lastIdRef.current, v: versionRef.current, ...(ttl !== undefined ? { ttl } : {}) }),
       });
       const data = (await res.json().catch(() => ({}))) as ChatSnapshot & { error?: string };
       if (!res.ok) {
@@ -310,6 +425,42 @@ export function ChatView({ endpoint, initial, maxLength, headerStart, headerActi
     return out;
   }, [messages, hydrated, lang, t]);
 
+  /** Decrypted payload of an E2EE message: { text?, file? {name, mime, iv} }. */
+  const decryptedOf = (m: ChatMessage): { text: string; file: { name: string; mime: string; iv: string } | null } | null => {
+    if (!m.encrypted) return null;
+    const plain = plainBodies.get(m.id);
+    if (plain === undefined) return null;
+    if (!plain) return { text: "", file: null };
+    try {
+      const parsed = JSON.parse(plain) as { text?: string; file?: { name?: string; mime?: string; iv?: string } };
+      return {
+        text: typeof parsed.text === "string" ? parsed.text : "",
+        file: parsed.file?.iv && parsed.file?.name ? { name: parsed.file.name, mime: parsed.file.mime ?? "application/octet-stream", iv: parsed.file.iv } : null,
+      };
+    } catch {
+      return { text: plain, file: null };
+    }
+  };
+
+  /** §4.11 — download an E2EE file: fetch ciphertext, decrypt, save locally. */
+  const downloadEncrypted = async (m: ChatMessage, meta: { name: string; iv: string }) => {
+    const unlocked = getUnlocked(roomId);
+    if (!unlocked || !m.file) return;
+    try {
+      const res = await fetch(`/api/files/${m.file.id}`, { cache: "no-store" });
+      if (!res.ok) throw new Error("fetch failed");
+      const blob = await decryptFile(unlocked.privateKey, unlocked.peerPublicKeyJwk, roomId, meta.iv, await res.arrayBuffer());
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = meta.name;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 4000);
+    } catch {
+      setError("network");
+    }
+  };
+
   const systemText = (m: ChatMessage) => {
     const map: Record<string, string> = {
       joined: fmt(t.chat.joined, { name: m.authorName }),
@@ -364,6 +515,11 @@ export function ChatView({ endpoint, initial, maxLength, headerStart, headerActi
           )}
         </div>
         <div className="flex shrink-0 items-center gap-1.5">
+          {room.e2eeEnabled ? (
+            <span className="badge badge-accent hidden sm:inline-flex" title={t.e2ee.subtitle}>
+              {t.e2ee.badge}
+            </span>
+          ) : null}
           {room.hasPassword ? (
             <span className="badge badge-accent hidden sm:inline-flex">
               <KeyRound className="size-3" />
@@ -382,6 +538,7 @@ export function ChatView({ endpoint, initial, maxLength, headerStart, headerActi
 
       {/* Messages */}
       <div className="relative min-h-0 flex-1">
+        {watermark ? <WatermarkOverlay username={me.nickname} /> : null}
         {offline ? (
           <div className="pointer-events-none absolute inset-x-0 top-3 z-20 flex justify-center">
             <span className="badge badge-amber shadow-soft">
@@ -492,11 +649,64 @@ export function ChatView({ endpoint, initial, maxLength, headerStart, headerActi
                           </span>
                         </span>
                       ) : null}
-                      {m.file ? <FileBubble m={m} expired={expiredFiles.has(m.file.id)} onExpired={() => setExpiredFiles((prev) => new Set(prev).add(m.file!.id))} /> : null}
-                      {m.body ? (
-                        <p dir="auto" className="whitespace-pre-wrap">
-                          {linkify(m.body)}
-                        </p>
+                      {(() => {
+                        const dec = decryptedOf(m);
+                        if (m.encrypted) {
+                          if (!dec) {
+                            return (
+                              <p className="flex items-center gap-1.5 text-xs font-semibold text-muted" dir="auto">
+                                <LockKeyhole className="size-3.5" />
+                                {e2eeUnlocked ? t.chat.decrypting : t.e2ee.locked}
+                              </p>
+                            );
+                          }
+                          return (
+                            <>
+                              {dec.file ? (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    void downloadEncrypted(m, dec.file!);
+                                  }}
+                                  className="mb-1 flex items-center gap-2.5 rounded-xl border border-line bg-surface-2 px-3 py-2.5 transition hover:border-accent/50"
+                                >
+                                  <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-surface-3 text-accent-ink">
+                                    <LockKeyhole className="size-4" />
+                                  </span>
+                                  <span className="min-w-0 flex-1 text-start">
+                                    <span className="block truncate text-xs font-bold text-ink" dir="auto">
+                                      {dec.file.name}
+                                    </span>
+                                    <span className="text-[11px] text-muted">{t.e2ee.fileEncrypted} · {m.file ? formatSize(m.file.size) : ""}</span>
+                                  </span>
+                                  <Download className="size-4 shrink-0 text-muted" />
+                                </button>
+                              ) : null}
+                              {dec.text ? (
+                                <p dir="auto" className="whitespace-pre-wrap">
+                                  {linkify(dec.text)}
+                                </p>
+                              ) : null}
+                            </>
+                          );
+                        }
+                        return (
+                          <>
+                            {m.file ? <FileBubble m={m} expired={expiredFiles.has(m.file.id)} onExpired={() => setExpiredFiles((prev) => new Set(prev).add(m.file!.id))} /> : null}
+                            {m.body ? (
+                              <p dir="auto" className="whitespace-pre-wrap">
+                                {linkify(m.body)}
+                              </p>
+                            ) : null}
+                          </>
+                        );
+                      })()}
+                      {m.expiresAt ? (
+                        <span className="mt-0.5 inline-flex items-center gap-1 rounded-full bg-surface-3/80 px-1.5 py-0.5 text-[10px] font-semibold text-muted" title={t.selfdestruct.subtitle}>
+                          <Timer className="size-3" />
+                          {formatDate(m.expiresAt, lang, { hour: "2-digit", minute: "2-digit" })}
+                        </span>
                       ) : null}
                       <span className={cn("mt-0.5 flex items-center justify-end gap-1 text-[10.5px] leading-4", mine ? "opacity-60" : "text-faint")}>
                         {m.source === "telegram" ? (
@@ -590,6 +800,35 @@ export function ChatView({ endpoint, initial, maxLength, headerStart, headerActi
               </button>
             </div>
           ) : null}
+          {room.e2eeEnabled && !e2eeUnlocked ? (
+            <div className="pop-in mb-2 flex flex-wrap items-center gap-2 rounded-xl border border-accent/40 bg-accent-soft/60 px-3 py-2.5">
+              <Unlock className="size-4 shrink-0 text-accent-ink" />
+              <div className="min-w-0 flex-1">
+                <p className="text-xs font-extrabold text-accent-ink">{t.e2ee.unlock}</p>
+                <p className="text-[11px] leading-relaxed text-muted">{t.e2ee.unlockHint}</p>
+              </div>
+              <input
+                type="password"
+                className="input h-9 w-40"
+                value={e2eePassword}
+                onChange={(e) => setE2eePassword(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    void unlockE2ee();
+                  }
+                }}
+                placeholder={t.auth.password}
+                dir="ltr"
+                autoComplete="current-password"
+              />
+              <button type="button" className="btn btn-primary btn-sm h-9" onClick={() => void unlockE2ee()}>
+                <Unlock className="size-3.5" />
+                {t.e2ee.unlock}
+              </button>
+              {e2eeError ? <span className="w-full text-[11px] font-semibold text-rose-ink">{errorText(t, e2eeError)}</span> : null}
+            </div>
+          ) : null}
           {composerLocked ? (
             <div className="notice notice-amber justify-center">
               <Lock className="mt-0.5 size-4 shrink-0" />
@@ -601,6 +840,7 @@ export function ChatView({ endpoint, initial, maxLength, headerStart, headerActi
                 e.preventDefault();
                 void send();
               }}
+              data-tutorial="composer"
               className="flex items-end gap-2 rounded-2xl border border-line-strong bg-surface p-1.5 ps-2.5 transition focus-within:border-accent focus-within:shadow-[0_0_0_4px_var(--ring)]"
             >
               <input
@@ -625,6 +865,20 @@ export function ChatView({ endpoint, initial, maxLength, headerStart, headerActi
               >
                 <Paperclip className="size-[18px]" />
               </button>
+              <select
+                value={ttlChoice}
+                onChange={(e) => setTtlChoice(e.target.value)}
+                className="h-9 shrink-0 cursor-pointer rounded-lg border border-line bg-surface-2 px-1.5 text-[11px] font-semibold text-muted outline-none transition hover:border-line-strong"
+                aria-label={t.selfdestruct.title}
+                title={t.selfdestruct.title}
+                data-tutorial="composer"
+              >
+                <option value="default">{room.defaultTtl ? (room.defaultTtl === 3600 ? t.selfdestruct.oneHour : room.defaultTtl === 86400 ? t.selfdestruct.oneDay : t.selfdestruct.oneWeek) : t.selfdestruct.off}</option>
+                <option value="off">{t.selfdestruct.off}</option>
+                <option value="3600">{t.selfdestruct.oneHour}</option>
+                <option value="86400">{t.selfdestruct.oneDay}</option>
+                <option value="604800">{t.selfdestruct.oneWeek}</option>
+              </select>
               <textarea
                 ref={inputRef}
                 rows={1}
@@ -721,6 +975,30 @@ function ToolButton({
     >
       {children}
     </button>
+  );
+}
+
+/**
+ * §4.11 — faint personalized watermark over the conversation. Browsers cannot
+ * block screenshots; a per-user watermark makes every leak traceable to its
+ * owner (deterrence, not prevention).
+ */
+function WatermarkOverlay({ username }: { username: string }) {
+  const stamp = `${username} · ${new Date().toISOString().slice(0, 10)}`;
+  return (
+    <div aria-hidden="true" className="pointer-events-none absolute inset-0 z-10 select-none overflow-hidden">
+      <div className="absolute inset-0 flex flex-col justify-between py-8" style={{ transform: "rotate(-18deg) scale(1.2)" }}>
+        {Array.from({ length: 6 }).map((_, row) => (
+          <div key={row} className="flex justify-around gap-10 whitespace-nowrap">
+            {Array.from({ length: 3 }).map((_, col) => (
+              <span key={col} className="text-[11px] font-bold tracking-wide text-ink/[0.055] dark:text-white/[0.05]">
+                {stamp}
+              </span>
+            ))}
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 

@@ -19,6 +19,7 @@ import {
   Settings2,
   ShieldCheck,
   Terminal,
+  Timer,
   TriangleAlert,
   UserCheck,
   Users,
@@ -26,6 +27,7 @@ import {
   Zap,
 } from "lucide-react";
 import { roomAction } from "@/app/actions/rooms";
+import { setRoomTtlAction } from "@/app/actions/e2ee";
 import { Avatar } from "@/components/brand";
 import { ChatView } from "@/components/chat/chat-view";
 import { useI18n } from "@/components/i18n-provider";
@@ -42,6 +44,8 @@ export type WorkspaceRoom = {
   hasPassword: boolean;
   isLocked: boolean;
   isDisabled: boolean;
+  /** default self-destruct TTL in seconds (null = off) */
+  defaultTtl: number | null;
 };
 export type WorkspaceMember = { id: string; shortId: string; nickname: string; status: string; lastSeenAt: string };
 export type WorkspaceTelegram = {
@@ -381,7 +385,7 @@ function RoomManager({ room, members, telegram, commands }: Props) {
         ) : null}
 
         {tab === "members" ? (
-          <section className="card p-5">
+          <section className="card p-5" data-tutorial="online-status">
             <PanelTitle icon={Users} tone="mint" title={t.room.membersTitle} aside={<span className="badge badge-neutral">{formatNumber(activeMembers, lang)}</span>} />
             {members.length === 0 ? (
               <p className="mt-4 text-sm leading-relaxed text-muted">{t.room.membersEmpty}</p>
@@ -456,6 +460,25 @@ function RoomManager({ room, members, telegram, commands }: Props) {
                   <textarea id="room-desc-edit" name="description" className="input" rows={3} maxLength={280} defaultValue={room.description} dir="auto" />
                 </div>
                 <SubmitButton className="btn btn-primary btn-sm">{t.common.save}</SubmitButton>
+              </ActionForm>
+            </section>
+            <section className="card p-5" data-tutorial="rooms">
+              <PanelTitle icon={Timer} title={t.selfdestruct.title} />
+              <p className="mt-1 text-xs leading-relaxed text-muted">{t.selfdestruct.subtitle}</p>
+              <ActionForm action={setRoomTtlAction} showMessage={false} className="mt-4 flex items-center gap-2">
+                <input type="hidden" name="roomId" value={room.id} />
+                <select
+                  name="ttl"
+                  defaultValue={room.defaultTtl === 3600 ? "3600" : room.defaultTtl === 86400 ? "86400" : room.defaultTtl === 604800 ? "604800" : "off"}
+                  className="input h-10 flex-1"
+                  aria-label={t.selfdestruct.title}
+                >
+                  <option value="off">{t.selfdestruct.off}</option>
+                  <option value="3600">{t.selfdestruct.oneHour}</option>
+                  <option value="86400">{t.selfdestruct.oneDay}</option>
+                  <option value="604800">{t.selfdestruct.oneWeek}</option>
+                </select>
+                <SubmitButton className="btn btn-primary btn-sm h-10">{t.common.save}</SubmitButton>
               </ActionForm>
             </section>
             <section className="card border-rose/70 p-5">

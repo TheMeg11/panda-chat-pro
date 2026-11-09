@@ -6,6 +6,7 @@ import { BellOff, ExternalLink, Lock, Send, Terminal, Unplug } from "lucide-reac
 import { roomAction } from "@/app/actions/rooms";
 import {
   startTelegramLinkAction,
+  telegramBotDmAction,
   telegramForwardAction,
   telegramUnlinkAction,
 } from "@/app/actions/telegram";
@@ -23,6 +24,7 @@ export type TelegramCardProps = {
     chatName: string;
     username: string | null;
     forwardEnabled: boolean;
+    allowBotDm: boolean;
     mutedRooms: Array<{ id: string; name: string }>;
   } | null;
   commands: Array<{ command: string; description: string }>;
@@ -79,7 +81,7 @@ export function TelegramCard({ telegramEnabled, paid, allowed, botUsername, link
         </div>
       ) : !link ? (
         <div className="mt-5">
-          {state.ok && state.data?.url ? (
+          {state.ok && typeof state.data?.url === "string" ? (
             <div className="pop-in space-y-4 rounded-2xl border border-line bg-surface-2/60 p-4">
               <p className="text-sm leading-relaxed text-ink-2">{t.account.tgPendingText}</p>
               <ol className="space-y-2 text-sm text-muted">
@@ -153,6 +155,29 @@ export function TelegramCard({ telegramEnabled, paid, allowed, botUsername, link
                   className={cn(
                     "absolute top-[3px] size-[calc(1.45rem-6px)] rounded-full bg-white shadow transition-all",
                     link.forwardEnabled ? "start-[calc(100%-1.45rem+3px)]" : "start-[3px]",
+                  )}
+                />
+              </span>
+            </SubmitButton>
+          </ActionForm>
+
+          <ActionForm action={telegramBotDmAction} showMessage={false} className="flex items-center justify-between gap-4 rounded-2xl border border-line bg-surface-2/50 p-4">
+            <input type="hidden" name="enabled" value={link.allowBotDm ? "0" : "1"} />
+            <div>
+              <p className="text-sm font-bold text-ink">{t.account.tgBotDm}</p>
+              <p className="mt-0.5 text-xs leading-relaxed text-muted">{t.account.tgBotDmHint}</p>
+            </div>
+            <SubmitButton className="rounded-full p-0.5" title={t.account.tgBotDm}>
+              <span
+                className={cn(
+                  "relative block h-[1.45rem] w-10 rounded-full transition",
+                  link.allowBotDm ? "bg-gradient-to-r from-accent to-accent-2" : "bg-line-strong",
+                )}
+              >
+                <span
+                  className={cn(
+                    "absolute top-[3px] size-[calc(1.45rem-6px)] rounded-full bg-white shadow transition-all",
+                    link.allowBotDm ? "start-[calc(100%-1.45rem+3px)]" : "start-[3px]",
                   )}
                 />
               </span>

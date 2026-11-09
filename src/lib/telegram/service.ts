@@ -15,7 +15,9 @@ import { randomToken } from "../crypto";
 import { postMessage, softDeleteMessage } from "../chat";
 import {
   clearRoom,
+  findOrCreateDm,
   findMemberByShortId,
+  getAccessibleRoom,
   getOwnerMember,
   getRoomById,
   renameRoom,
@@ -25,8 +27,12 @@ import {
   setRoomPassword,
 } from "../rooms";
 import { getSettings } from "../settings";
+import { audit } from "../audit";
+import { rateLimit } from "../rate-limit";
 import { shortId } from "../utils";
 import { tg } from "./platform";
+import { getBotSettings, isBotAdmin, updateBotSettings } from "./bot-settings";
+import { storeFile } from "../files";
 
 /* ------------------------------------------------------------------ */
 /* Slash commands exposed in the Telegram UI                            */
@@ -53,6 +59,10 @@ export const BOT_COMMANDS = [
   { command: "unmute", description: "Resume notifications for this room" },
   { command: "muteall", description: "Pause ALL message forwarding" },
   { command: "unmuteall", description: "Resume message forwarding" },
+  { command: "send", description: "Post a message (or media) to the active room" },
+  { command: "msg", description: "Private message a linked user: /msg <username> <text>" },
+  { command: "setdefault", description: "Fallback room: /setdefault <id|off> (admins: platform-wide)" },
+  { command: "settings", description: "Your bot settings & privacy switches" },
   { command: "clear", description: "Delete all messages: /clear confirm" },
   { command: "unlink", description: "Disconnect this Telegram chat" },
 ];
@@ -68,7 +78,15 @@ const PUBLIC_NOTICE =
   "• manage rooms with slash commands.\n\n" +
   "To connect, open <b>Panda Chat → Account → Telegram</b>, press <i>Connect</i> and send me the /start code it shows.";
 
-function helpText(admin = false) {
+/** Custom admin-authored /start text, or the default notice. */
+async function welcomeText(): Promise<string> {
+  const botSettings = await getBotSettings();
+  return botSettings.startText.trim() ? botSettings.startText.trim().slice(0, 1500) : PUBLIC_NOTICE;
+}
+
+async function helpText(admin = false) {
+  const botSettings = await getBotSettings();
+  if (botSettings.helpText.trim()) return botSettings.helpText.trim().slice(0, 3000);
   return [
     "<b>🐼 Panda Chat bot</b>",
     "",
@@ -76,7 +94,7 @@ function helpText(admin = false) {
     "",
     ...BOT_COMMANDS.map((c) => `/${c.command} — ${esc(c.description)}`),
     "/del — reply to a message with /del to delete it from the room",
-    ...(admin ? ["", "<b>🛡 Super Admin</b>", "/backup /restore /platform — server management"] : []),
+    ...(admin ? ["", "<b>🛡 Super Admin</b>", "/backup /restore /platform — server management", "/setdefault &lt;roomId&gt; — set the platform fallback room"] : []),
   ].join("\n");
 }
 
@@ -131,6 +149,9 @@ export async function forwardMessageToTelegram(roomId: string, messageId: number
   const ctx = await loadOwnerContext(roomId);
   if (!ctx || !ctx.link || !deliverable(ctx.owner, ctx.link, settings) || ctx.room.isDisabled) return;
   const { room, owner, link } = ctx;
+  // E2EE rooms are never forwarded: the bot would only receive ciphertext it
+  // cannot decrypt, and the server must not become a decryption oracle (§6.8).
+  if (room.e2eeEnabled) return;
   if (!link.forwardEnabled || link.mutedRooms.includes(roomId)) return;
 
   const [msg] = await db.select().from(messages).where(eq(messages.id, messageId)).limit(1);
@@ -213,12 +234,21 @@ export async function sendTestToOwner(roomId: string): Promise<"ok" | "nolink" |
 /* ------------------------------------------------------------------ */
 
 type TgUser = { id: number; first_name?: string; last_name?: string; username?: string };
+type TgFileLike = { file_id: string; file_name?: string; file_size?: number; mime_type?: string };
 type TgMessage = {
   message_id: number;
   chat: { id: number; type: string; first_name?: string };
   from?: TgUser;
   text?: string;
-  document?: { file_id: string; file_name?: string; file_size?: number };
+  caption?: string;
+  document?: TgFileLike;
+  photo?: Array<{ file_id: string; file_size?: number }>;
+  video?: TgFileLike;
+  animation?: TgFileLike;
+  voice?: { file_id: string; duration?: number; mime_type?: string };
+  audio?: TgFileLike;
+  video_note?: { file_id: string };
+  sticker?: { file_id: string; emoji?: string };
   reply_to_message?: { message_id: number };
 };
 export type TgUpdate = {
@@ -226,6 +256,43 @@ export type TgUpdate = {
   message?: TgMessage;
   callback_query?: { id: string; from: TgUser; data?: string; message?: TgMessage };
 };
+
+/** Picks the largest attachable media payload off a Telegram message. */
+function extractMedia(msg: TgMessage): { file_id: string; name: string; mime: string } | null {
+  if (msg.document?.file_id) return { file_id: msg.document.file_id, name: msg.document.file_name ?? "file", mime: msg.document.mime_type ?? "application/octet-stream" };
+  if (msg.photo?.length) { const p = msg.photo[msg.photo.length - 1]; return { file_id: p.file_id, name: "photo.jpg", mime: "image/jpeg" }; }
+  if (msg.video?.file_id) return { file_id: msg.video.file_id, name: msg.video.file_name ?? "video.mp4", mime: "video/mp4" };
+  if (msg.animation?.file_id) return { file_id: msg.animation.file_id, name: msg.animation.file_name ?? "animation.mp4", mime: "video/mp4" };
+  if (msg.voice?.file_id) return { file_id: msg.voice.file_id, name: "voice.ogg", mime: "audio/ogg" };
+  if (msg.audio?.file_id) return { file_id: msg.audio.file_id, name: msg.audio.file_name ?? "audio.mp3", mime: "audio/mpeg" };
+  if (msg.video_note?.file_id) return { file_id: msg.video_note.file_id, name: "video-note.mp4", mime: "video/mp4" };
+  return null;
+}
+
+/** Downloads a Telegram file (≤20MB by API contract) into a Blob. */
+async function downloadTgFile(token: string, fileId: string): Promise<Blob | null> {
+  try {
+    const info = await tg<{ file_path?: string }>(token, "getFile", { file_id: fileId });
+    if (!info.file_path) return null;
+    const res = await fetch(`https://api.telegram.org/file/bot${token}/${info.file_path}`, {
+      signal: AbortSignal.timeout(60_000),
+      cache: "no-store",
+    });
+    if (!res.ok) return null;
+    return await res.blob();
+  } catch {
+    return null;
+  }
+}
+
+/** Stores a Telegram media payload as a room file and returns its id. */
+async function storeTgMedia(token: string, roomId: string, memberId: string, media: { file_id: string; name: string; mime: string }): Promise<string | null> {
+  const blob = await downloadTgFile(token, media.file_id);
+  if (!blob) return null;
+  const file = new File([blob], media.name, { type: media.mime });
+  const stored = await storeFile(roomId, memberId, file);
+  return stored.ok ? stored.file.id : null;
+}
 
 export async function handleUpdate(update: TgUpdate) {
   const bot = await import("./platform").then((m) => m.getPlatformBot());
@@ -307,10 +374,18 @@ export async function handleUpdate(update: TgUpdate) {
   if (msg.chat.type !== "private") return void (await send(chatId, "🐼 Please talk to me in a private chat."));
 
   const settings = await getSettings();
-  const text = (msg.text ?? "").trim();
+  const botSettings = await getBotSettings();
+  const text = (msg.text ?? msg.caption ?? "").trim();
   const first = text.split(/\s+/)[0] ?? "";
   const cmd = first.startsWith("/") ? first.slice(1).split("@")[0].toLowerCase() : "";
   const arg = text.slice(first.length).trim();
+  const media = extractMedia(msg);
+
+  // §6.8 anti-abuse: coarse per-chat command/message rate limit.
+  if (cmd || text || media) {
+    if (!rateLimit(`tgcmd:${chatId}`, botSettings.commandRatePerMin, 60_000).ok)
+      return void (await send(chatId, "⏳ Slow down a little — too many messages per minute."));
+  }
 
   /* Super Admin commands (backup / restore / platform) — only for the configured admin chats */
   const { tryHandleSuperadmin } = await import("./superadmin");
@@ -320,8 +395,8 @@ export async function handleUpdate(update: TgUpdate) {
 
   /* ---------------- linking ---------------- */
   if (cmd === "start") {
-    if (ctx) return void (await send(chatId, helpText()));
-    if (!arg) return void (await send(chatId, PUBLIC_NOTICE));
+    if (ctx) return void (await send(chatId, await helpText()));
+    if (!arg) return void (await send(chatId, await welcomeText()));
     const [codeRow] = await db
       .select({ code: telegramLinkCodes, user: users })
       .from(telegramLinkCodes)
@@ -377,10 +452,20 @@ export async function handleUpdate(update: TgUpdate) {
         },
       });
     await db.delete(telegramLinkCodes).where(eq(telegramLinkCodes.userId, codeRow.user.id));
-    return void (await send(chatId, `✅ <b>Linked!</b> Your account is now connected to this chat.\n\n${helpText()}`));
+    return void (await send(chatId, `✅ <b>Linked!</b> Your account is now connected to this chat.\n\n${await helpText()}`));
   }
 
-  if (!ctx) return void (await send(chatId, PUBLIC_NOTICE));
+  /* ---------------- fallback routing (§6.4) ----------------
+   * UNLINKED chats: a non-command message (text or media) is delivered to the
+   * platform's default room when the admin enabled it — otherwise the welcome
+   * notice. Known commands never fall through, and the bot's own replies are
+   * never routed (messages sent BY the bot do not appear in getUpdates). */
+  if (!ctx) {
+    if (!cmd && (text || media)) {
+      return void (await routeFallbackMessage(bot.token, msg, botSettings));
+    }
+    return void (await send(chatId, await welcomeText()));
+  }
   const { link, user } = ctx;
   if (user.status !== "active") return void (await send(chatId, "⛔ Your Panda Chat account is suspended."));
   if (!settings.telegramEnabled) return void (await send(chatId, "⛔ The Telegram integration is currently disabled by the administrator."));
@@ -423,7 +508,7 @@ export async function handleUpdate(update: TgUpdate) {
 
   switch (cmd) {
     case "help":
-      return void (await send(chatId, helpText()));
+      return void (await send(chatId, await helpText(await isBotAdmin(chatId))));
     case "me": {
       const [c] = await db.select({ n: sql<number>`count(*)::int` }).from(rooms).where(eq(rooms.ownerId, link.userId));
       return void (await send(
@@ -572,6 +657,9 @@ export async function handleUpdate(update: TgUpdate) {
     case "recent": {
       const room = await needRoom();
       if (!room) return;
+      // E2EE history is unreadable for the bot (and must stay that way).
+      if (room.e2eeEnabled)
+        return void (await send(chatId, "🔒 That conversation is end-to-end encrypted — history is only readable inside the web app."));
       const n = Math.min(30, Math.max(1, Number(arg) || 10));
       const recent = (
         await db
@@ -631,6 +719,154 @@ export async function handleUpdate(update: TgUpdate) {
       await renameRoom(room.id, name);
       return void (await send(chatId, `✏️ Room renamed to <b>${esc(name)}</b>.`));
     }
+    case "send": {
+      // §6.1 — explicit post-to-room (text or media), with reply threading.
+      if (!botSettings.allowRoomSend) return void (await send(chatId, "⛔ Sending to rooms via the bot is disabled by the administrator."));
+      const room = await needRoom();
+      if (!room) return;
+      if (room.e2eeEnabled) return void (await send(chatId, "🔒 That conversation is end-to-end encrypted — send messages from the web app."));
+      if (room.isLocked) return void (await send(chatId, "🔒 The room is locked — only the website can post right now."));
+      const body = arg;
+      if (!body && !media) return void (await send(chatId, "Usage: <code>/send your message</code> — or just send me any message/photo/document without a command."));
+      const ownerMember = await getOwnerMember(room, user);
+      const fileId = media ? await storeTgMedia(bot.token, room.id, ownerMember.id, media) : null;
+      let replyToId: number | null = null;
+      if (msg.reply_to_message) {
+        const [target] = await db
+          .select({ id: messages.id })
+          .from(messages)
+          .where(and(eq(messages.roomId, room.id), eq(messages.tgMessageId, msg.reply_to_message.message_id)))
+          .limit(1);
+        replyToId = target?.id ?? null;
+      }
+      await postMessage(
+        room,
+        { memberId: ownerMember.id, nickname: user.displayName, role: "owner", authorName: user.displayName },
+        body.slice(0, settings.maxMessageLength),
+        replyToId,
+        "telegram",
+        fileId,
+      );
+      return void (await send(chatId, "✓ Posted to the room", { disable_notification: true }));
+    }
+    case "msg": {
+      // §6.2 — private message to another LINKED account (opt-in by receiver).
+      if (!botSettings.allowBotDm) return void (await send(chatId, "⛔ Bot direct messages are disabled by the administrator."));
+      const [rawName, ...rest] = arg.split(/\s+/);
+      const body = rest.join(" ").trim();
+      if (!rawName || !body) return void (await send(chatId, "Usage: <code>/msg username your message</code>"));
+      const uname = rawName.replace(/^@/, "").toLowerCase();
+      if (uname === user.username) return void (await send(chatId, "That's you 🙂 — messages to yourself aren't needed."));
+      const [peer] = await db.select().from(users).where(eq(users.username, uname)).limit(1);
+      if (!peer || peer.status !== "active") return void (await send(chatId, "No active Panda Chat account with that username."));
+      const [peerLink] = await db.select().from(telegramLinks).where(eq(telegramLinks.userId, peer.id)).limit(1);
+      if (!peerLink) return void (await send(chatId, "That user hasn't connected their Telegram to Panda Chat yet."));
+      if (!peerLink.allowBotDm)
+        return void (await send(chatId, "That user hasn't enabled bot DMs — they can switch it on in <b>Account → Telegram → Allow private bot messages</b>."));
+      const dm = await findOrCreateDm(user, peer);
+      if (dm.e2eeEnabled) return void (await send(chatId, "🔒 That conversation is end-to-end encrypted — send messages from the web app."));
+      const ownerMember = await getOwnerMember(dm, user);
+      const posted = await postMessage(
+        dm,
+        { memberId: ownerMember.id, nickname: user.displayName, role: "owner", authorName: user.displayName },
+        body.slice(0, settings.maxMessageLength),
+        null,
+        "telegram",
+      );
+      // Deliver to the receiver's Telegram chat with a reply-thread mapping so
+      // their answer lands back in the SAME conversation (§6.3).
+      try {
+        const sent = await tg<{ message_id: number }>(bot.token, "sendMessage", {
+          chat_id: peerLink.chatId,
+          text: `✉️ <b>${esc(user.displayName)}</b> (@${esc(user.username)}) sent you a private message:\n\n${esc(body.slice(0, 3000))}\n\n<i>Reply to this message to answer them.</i>`,
+          parse_mode: "HTML",
+          link_preview_options: { is_disabled: true },
+        });
+        await db.update(messages).set({ tgMessageId: sent.message_id }).where(eq(messages.id, posted.id));
+      } catch (error) {
+        console.error("[panda-chat] bot /msg delivery failed", error);
+      }
+      return void (await send(chatId, `✓ Sent to <b>${esc(peer.displayName)}</b>`, { disable_notification: true }));
+    }
+    case "setdefault": {
+      // §6.4 — admins set the PLATFORM default room; users set their OWN fallback.
+      const admin = await isBotAdmin(chatId);
+      if (!arg) {
+        const [platformRoom] = botSettings.defaultRoomId ? await db.select({ name: rooms.name }).from(rooms).where(eq(rooms.id, botSettings.defaultRoomId)).limit(1) : [];
+        const [ownRoom] = link.fallbackRoomId ? await db.select({ name: rooms.name }).from(rooms).where(eq(rooms.id, link.fallbackRoomId)).limit(1) : [];
+        return void (await send(
+          chatId,
+          [
+            "<b>🧭 Default routing</b>",
+            "",
+            `Platform fallback: <b>${botSettings.fallbackEnabled ? "on" : "off"}</b>${platformRoom?.name ? ` → ${esc(platformRoom.name)}` : ""}`,
+            `Your fallback room: <b>${ownRoom?.name ? esc(ownRoom.name) : "not set"}</b>`,
+            `Active room: <b>${link.activeRoomId ? "set via /rooms" : "not set"}</b>`,
+            "",
+            admin
+              ? "As an admin: <code>/setdefault &lt;room-id&gt;</code> sets the platform default · <code>/setdefault off</code> disables it."
+              : "<code>/setdefault &lt;room-id&gt;</code> sets where YOUR unmatched messages go · <code>/setdefault off</code> clears it.",
+          ].join("\n"),
+        ));
+      }
+      if (arg.toLowerCase() === "off" || arg.toLowerCase() === "none") {
+        if (admin) {
+          await updateBotSettings({ defaultRoomId: null, fallbackEnabled: false });
+          await audit("telegram.setdefault", { details: "platform fallback disabled" }).catch(() => undefined);
+          return void (await send(chatId, "✅ Platform fallback routing disabled."));
+        }
+        await db.update(telegramLinks).set({ fallbackRoomId: null, updatedAt: new Date() }).where(eq(telegramLinks.userId, link.userId));
+        return void (await send(chatId, "✅ Your fallback room was cleared."));
+      }
+      // Resolve the target room: a full UUID, or an exact name among the user's rooms.
+      let target: Room | null = null;
+      const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(arg) ? arg : null;
+      if (uuid) {
+        const room = await getRoomById(uuid);
+        target = room && (admin || room.ownerId === link.userId) ? room : null;
+      } else {
+        const [owned] = await db
+          .select()
+          .from(rooms)
+          .where(and(eq(rooms.ownerId, link.userId), eq(rooms.name, arg.slice(0, 80))))
+          .limit(1);
+        target = owned ?? null;
+        if (!target && admin) {
+          const [any] = await db.select().from(rooms).where(eq(rooms.name, arg.slice(0, 80))).limit(1);
+          target = any ?? null;
+        }
+      }
+      if (!target || target.type === "dm") return void (await send(chatId, "Room not found. Copy the room id from the website, or use the exact room name you own."));
+      if (target.e2eeEnabled) return void (await send(chatId, "🔒 Encrypted conversations cannot be a bot routing destination."));
+      if (admin) {
+        await updateBotSettings({ defaultRoomId: target.id, fallbackEnabled: true });
+        await audit("telegram.setdefault", { targetType: "room", targetId: target.id, details: `platform default → ${target.name}` }).catch(() => undefined);
+        return void (await send(chatId, `✅ Platform default room: <b>${esc(target.name)}</b>\nUnmatched messages from unlinked chats now land there.`));
+      }
+      await db.update(telegramLinks).set({ fallbackRoomId: target.id, updatedAt: new Date() }).where(eq(telegramLinks.userId, link.userId));
+      return void (await send(chatId, `✅ Your fallback room: <b>${esc(target.name)}</b> — your unmatched messages go there.`));
+    }
+    case "settings": {
+      const flag = arg.toLowerCase();
+      if (flag === "dmon" || flag === "dmoff") {
+        await db.update(telegramLinks).set({ allowBotDm: flag === "dmon", updatedAt: new Date() }).where(eq(telegramLinks.userId, link.userId));
+        return void (await send(chatId, flag === "dmon" ? "✅ Other linked users can now reach you with <b>/msg</b>." : "✅ Bot direct messages are now closed for your account."));
+      }
+      const [activeRoom] = link.activeRoomId ? await db.select({ name: rooms.name }).from(rooms).where(eq(rooms.id, link.activeRoomId)).limit(1) : [];
+      const [fallbackRoom] = link.fallbackRoomId ? await db.select({ name: rooms.name }).from(rooms).where(eq(rooms.id, link.fallbackRoomId)).limit(1) : [];
+      return void (await send(
+        chatId,
+        [
+          "<b>⚙️ Your bot settings</b>",
+          "",
+          `🔔 Forwarding: <b>${link.forwardEnabled ? "on" : "paused"}</b> (<code>/muteall</code> / <code>/unmuteall</code>)`,
+          `📍 Active room: <b>${activeRoom?.name ? esc(activeRoom.name) : "not set"}</b> (<code>/rooms</code>)`,
+          `🧭 Your fallback room: <b>${fallbackRoom?.name ? esc(fallbackRoom.name) : "not set"}</b> (<code>/setdefault</code>)`,
+          `✉️ Private bot messages: <b>${link.allowBotDm ? "allowed" : "closed"}</b> (<code>/settings dmon</code> / <code>/settings dmoff</code>)`,
+          `🔕 Muted rooms: <b>${link.mutedRooms.length}</b>`,
+        ].join("\n"),
+      ));
+    }
     case "unlink":
       await db.delete(telegramLinks).where(eq(telegramLinks.userId, link.userId));
       return void (await send(chatId, "👋 This chat was disconnected. You can link again from the Panda Chat website."));
@@ -652,10 +888,50 @@ export async function handleUpdate(update: TgUpdate) {
     }
     default: {
       if (cmd) return void (await send(chatId, "Unknown command. Send /help to see what I can do."));
-      if (!text) return void (await send(chatId, "Only text messages are supported for now."));
-      const room = await needRoom();
+
+      /* §6.3 — Reply threading: a reply to ANY bot-delivered message resolves
+       * back to its original conversation (room OR DM), not just the active
+       * room. The tg_message_id mapping persists in the DB, so threads survive
+       * restarts and never lose their link. */
+      if (msg.reply_to_message?.message_id) {
+        const [target] = await db
+          .select({ id: messages.id, roomId: messages.roomId })
+          .from(messages)
+          .where(eq(messages.tgMessageId, msg.reply_to_message.message_id))
+          .limit(1);
+        if (target) {
+          const targetRoom = await getAccessibleRoom(link.userId, target.roomId);
+          if (targetRoom && !targetRoom.e2eeEnabled && !targetRoom.isDisabled) {
+            const member = await getOwnerMember(targetRoom, user);
+            const fileId = media ? await storeTgMedia(bot.token, targetRoom.id, member.id, media) : null;
+            await postMessage(
+              targetRoom,
+              { memberId: member.id, nickname: user.displayName, role: "owner", authorName: user.displayName },
+              text.slice(0, settings.maxMessageLength),
+              target.id,
+              "telegram",
+              fileId,
+            );
+            return void (await send(chatId, "✓ Reply delivered", { disable_notification: true }));
+          }
+        }
+      }
+
+      if (!text && !media) return void (await send(chatId, "Only text and media messages are supported for now."));
+
+      // Destination: active room → personal fallback → clear error (never a
+      // mystery drop). E2EE rooms are rejected with an explicit message.
+      let room = await needRoom();
+      if (!room && link.fallbackRoomId) {
+        const fb = await getRoomById(link.fallbackRoomId);
+        if (fb && fb.ownerId === link.userId) room = fb;
+      }
       if (!room) return;
+      if (room.e2eeEnabled) return void (await send(chatId, "🔒 That conversation is end-to-end encrypted — send messages from the web app."));
+      if (room.isLocked) return void (await send(chatId, "🔒 The room is locked — messages can't be posted right now."));
+
       const ownerMember = await getOwnerMember(room, user);
+      const fileId = media ? await storeTgMedia(bot.token, room.id, ownerMember.id, media) : null;
       let replyToId: number | null = null;
       if (msg.reply_to_message) {
         const [target] = await db
@@ -671,6 +947,7 @@ export async function handleUpdate(update: TgUpdate) {
         text.slice(0, settings.maxMessageLength),
         replyToId,
         "telegram",
+        fileId,
       );
       await tg(bot.token, "setMessageReaction", {
         chat_id: chatId,
@@ -679,4 +956,65 @@ export async function handleUpdate(update: TgUpdate) {
       }).catch(() => send(chatId, "✓ Posted to the room", { disable_notification: true }));
     }
   }
+}
+
+/* ------------------------------------------------------------------ */
+/* Fallback routing (§6.4)                                             */
+/* ------------------------------------------------------------------ */
+
+/** Delivers a message from an UNLINKED Telegram chat into the default room. */
+async function routeFallbackMessage(token: string, msg: TgMessage, botSettings: Awaited<ReturnType<typeof getBotSettings>>): Promise<void> {
+  const chatId = String(msg.chat.id);
+  const send = (text: string) =>
+    tg(token, "sendMessage", {
+      chat_id: chatId,
+      text: text.slice(0, 4000),
+      parse_mode: "HTML",
+      link_preview_options: { is_disabled: true },
+    }).catch(() => undefined);
+
+  if (!botSettings.fallbackEnabled) return void (await send(await welcomeText()));
+
+  // No destination configured → REFUSE the message (never deliver to a guess).
+  const room = botSettings.defaultRoomId ? await getRoomById(botSettings.defaultRoomId) : null;
+  if (!room || room.type !== "room" || room.isDisabled || room.e2eeEnabled) {
+    return void (await send("⚠️ The administrator hasn't set a default room for this bot yet, so your message can't be delivered. Please ask them to configure one."));
+  }
+
+  // Stable per-chat member row (device hash scoped to this Telegram chat).
+  const deviceHash = `tg:${chatId}`.slice(0, 80);
+  const nickname = ([msg.from?.first_name, msg.from?.last_name].filter(Boolean).join(" ") || "Telegram user").slice(0, 32);
+  let [member] = await db
+    .select()
+    .from(roomMembers)
+    .where(and(eq(roomMembers.roomId, room.id), eq(roomMembers.deviceHash, deviceHash)))
+    .limit(1);
+  if (!member) {
+    const [created] = await db
+      .insert(roomMembers)
+      .values({ roomId: room.id, deviceHash, nickname, role: "guest", passwordVersion: room.passwordVersion })
+      .onConflictDoUpdate({ target: [roomMembers.roomId, roomMembers.deviceHash], set: { nickname, status: "active", lastSeenAt: new Date() } })
+      .returning();
+    member = created;
+  } else if (member.status === "banned") {
+    return void (await send("⛔ You can't post to the default room."));
+  }
+
+  const text = (msg.text ?? msg.caption ?? "").trim();
+  const media = extractMedia(msg);
+  const fileId = media ? await storeTgMedia(token, room.id, member.id, media) : null;
+  if (!text && !fileId) return void (await send("Only text and media messages are supported."));
+
+  const settings = await getSettings();
+  await postMessage(
+    room,
+    { memberId: member.id, nickname, role: "guest", authorName: nickname },
+    text.slice(0, settings.maxMessageLength),
+    null,
+    "telegram",
+    fileId,
+  );
+
+  const ack = botSettings.fallbackAckText.replace("{room}", esc(room.name)) || "✓";
+  await send(ack);
 }

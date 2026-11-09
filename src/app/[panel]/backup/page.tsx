@@ -96,7 +96,7 @@ export default async function AdminBackups({ params }: { params: Promise<{ panel
                 <label className="label" htmlFor="backup-chat">
                   {t.admin.backupsChat}
                 </label>
-                <input id="backup-chat" name="chatId" className="input" inputMode="numeric" dir="ltr" defaultValue={config.chatId} placeholder="860835914" />
+                <input id="backup-chat" name="chatId" className="input" inputMode="numeric" dir="ltr" defaultValue={config.chatId} placeholder="123456789" />
                 <p className="hint">{t.admin.backupsChatHint}</p>
               </div>
               <div>

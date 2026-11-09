@@ -4,8 +4,8 @@ export type ActionState = {
   error?: string;
   /** dotted dictionary path (e.g. "room.saved") or plain text */
   message?: string;
-  /** extra payload (e.g. generated values) */
-  data?: Record<string, string>;
+  /** extra payload (e.g. generated values, arrays like recovery codes) */
+  data?: Record<string, unknown>;
 };
 
 export function cn(...parts: Array<string | false | null | undefined>): string {

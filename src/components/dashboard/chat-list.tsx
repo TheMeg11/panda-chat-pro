@@ -25,6 +25,7 @@ import type { DashboardChat } from "@/lib/rooms";
 import { cn } from "@/lib/utils";
 
 type Props = {
+  /** initial chats — empty by design (SSR privacy); the list loads from /api/chats */
   chats: DashboardChat[];
   user: { displayName: string; username: string };
   /** visible (non-vault) room count used inside the create-room modal hint */
@@ -39,14 +40,43 @@ const USERNAME_RE = /^[a-zA-Z0-9._]{2,32}$/;
  * Telegram-style chat list: menu + search on top, the conversation list below,
  * a floating "new chat" button. No counters, no stats, no greeting — anything
  * that could hint at hidden chats simply does not exist on this page.
+ *
+ * The list itself is fetched CLIENT-SIDE from /api/chats (no-store) so hidden
+ * conversations never appear in the server-rendered HTML.
  */
-export function ChatListPanel({ chats, user, roomLimit, totalRooms }: Props) {
+export function ChatListPanel({ chats: initialChats, user, roomLimit, totalRooms: initialTotal }: Props) {
   const { t } = useI18n();
   const pathname = usePathname();
   const [query, setQuery] = useState("");
   const [menuOpen, setMenuOpen] = useState(false);
   const [searched, setSearched] = useState<{ q: string; user: FoundUser | null } | null>(null);
+  const [chats, setChats] = useState<DashboardChat[]>(initialChats);
+  const [totalRooms, setTotalRooms] = useState(initialTotal);
+  const [loaded, setLoaded] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // §4.4: fetch the conversation list client-side, never from SSR HTML.
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const res = await fetch("/api/chats", { cache: "no-store" });
+        if (!res.ok) return;
+        const data = (await res.json()) as { chats: DashboardChat[]; totalRooms: number };
+        if (cancelled) return;
+        setChats(data.chats ?? []);
+        setTotalRooms(data.totalRooms ?? 0);
+      } catch {
+        /* offline — keep whatever we have */
+      } finally {
+        if (!cancelled) setLoaded(true);
+      }
+    };
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, [pathname]);
 
   const q = query.trim().toLowerCase();
   const filtered = q
@@ -96,7 +126,7 @@ export function ChatListPanel({ chats, user, roomLimit, totalRooms }: Props) {
   return (
     <div className="relative flex h-full min-h-0 flex-col">
       {/* Top bar: menu + search (Telegram-like) */}
-      <div className="relative flex shrink-0 items-center gap-2 border-b border-line bg-surface px-3 py-2.5">
+      <div className="relative flex shrink-0 items-center gap-2 border-b border-line bg-surface px-3 py-2.5" data-tutorial="user-search">
         <button
           type="button"
           className="btn btn-ghost btn-icon"
@@ -207,8 +237,20 @@ export function ChatListPanel({ chats, user, roomLimit, totalRooms }: Props) {
       ) : null}
 
       {/* Conversation list */}
-      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2 pb-24 pt-1.5">
-        {chats.length === 0 ? (
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2 pb-24 pt-1.5" data-tutorial="chat-list">
+        {!loaded ? (
+          <div className="mt-8 flex flex-col gap-2 px-2" aria-hidden="true">
+            {[0, 1, 2, 3].map((i) => (
+              <div key={i} className="flex items-center gap-3 rounded-xl px-2.5 py-2.5">
+                <span className="size-11 shrink-0 animate-pulse rounded-xl bg-surface-2" />
+                <span className="flex-1 space-y-1.5">
+                  <span className="block h-3 w-1/2 animate-pulse rounded bg-surface-2" />
+                  <span className="block h-2.5 w-3/4 animate-pulse rounded bg-surface-2" />
+                </span>
+              </div>
+            ))}
+          </div>
+        ) : chats.length === 0 ? (
           <div className="mt-16 flex flex-col items-center px-6 text-center">
             <PandaMark size={64} className="float-slow" />
             <p className="mt-5 font-extrabold text-ink">{t.dash.emptyTitle}</p>
@@ -259,7 +301,7 @@ export function ChatListPanel({ chats, user, roomLimit, totalRooms }: Props) {
       </div>
 
       {/* Floating "new chat" button */}
-      <div className="pointer-events-none absolute bottom-5 end-5 z-20">
+      <div className="pointer-events-none absolute bottom-5 end-5 z-20" data-tutorial="new-chat">
         <CreateRoomButton
           fab
           roomLimit={roomLimit}

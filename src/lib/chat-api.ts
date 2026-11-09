@@ -16,6 +16,8 @@ const json = (data: unknown, status = 200) =>
 
 /** Guard against oversized JSON bodies (maxMessageLength is ~2–10 KB; 256 KB is generous). */
 const MAX_JSON_BYTES = 256 * 1024;
+/** E2EE envelopes are base64 blobs — allow ~3x the raw limit. */
+const MAX_ENVELOPE_BYTES = 96 * 1024;
 
 function bodyTooLarge(req: Request): boolean {
   const len = Number(req.headers.get("content-length") ?? 0);
@@ -42,13 +44,33 @@ export async function chatPost(req: Request, room: Room, viewer: ChatViewer, roo
   const body = normalizeBody(payload?.body);
   const fileId = typeof payload?.fileId === "string" ? payload.fileId : null;
   if (!body && !fileId) return json({ error: "messageEmpty" }, 400);
-  if (body.length > settings.maxMessageLength) return json({ error: "messageTooLong" }, 400);
-  if (body.length > MAX_JSON_BYTES / 4) return json({ error: "messageTooLong" }, 413);
   if (room.isLocked && viewer.role !== "owner") return json({ error: "roomLocked" }, 403);
   if (!rateLimit(`msg:${viewer.memberId}`, 12, 10_000).ok) return json({ error: "rateLimited" }, 429);
 
-  const msg = await postMessage(room, viewer, body, Number(payload?.replyToId) || null, "web", fileId);
-  if (viewer.role === "guest") {
+  // E2EE conversations accept ENVELOPES ONLY — the server must never store
+  // readable plaintext for an E2EE room, so a non-envelope body is rejected.
+  const ENVELOPE_RE = /^e2ee\.v1\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/;
+  const encrypted = Boolean(room.e2eeEnabled);
+  if (encrypted) {
+    if (!ENVELOPE_RE.test(body)) return json({ error: "e2eeRequired" }, 400);
+    if (body.length > MAX_ENVELOPE_BYTES) return json({ error: "messageTooLong" }, 413);
+  } else {
+    if (ENVELOPE_RE.test(body)) return json({ error: "badRequest" }, 400); // envelope outside E2EE room
+    if (body.length > settings.maxMessageLength) return json({ error: "messageTooLong" }, 400);
+    if (body.length > MAX_JSON_BYTES / 4) return json({ error: "messageTooLong" }, 413);
+  }
+
+  // Self-destruct: per-send override, else the conversation default.
+  const ttlRaw = Number(payload?.ttl);
+  const ttl = Number.isSafeInteger(ttlRaw) && ttlRaw > 0 ? Math.min(ttlRaw, 7 * 86_400) : room.defaultTtl ?? null;
+
+  const msg = await postMessage(room, viewer, body, Number(payload?.replyToId) || null, "web", fileId, {
+    ttlSeconds: ttl,
+    encrypted,
+  });
+  // E2EE rooms never forward to Telegram — the bot must NOT receive ciphertext
+  // it cannot decrypt, and the server must not ship it a decryption oracle.
+  if (viewer.role === "guest" && !room.e2eeEnabled) {
     after(() =>
       forwardMessageToTelegram(room.id, msg.id).catch((error) => console.error("[panda-chat] forward failed", error)),
     );

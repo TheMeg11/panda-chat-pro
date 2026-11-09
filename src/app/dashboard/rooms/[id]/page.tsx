@@ -1,12 +1,13 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { and, eq, ne } from "drizzle-orm";
+import { and, eq, ne, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { roomMembers, users } from "@/db/schema";
+import { e2eeKeys, roomMembers, users } from "@/db/schema";
 import { RoomWorkspace } from "@/components/dashboard/room-workspace";
 import { DmWorkspace } from "@/components/dashboard/dm-workspace";
 import { requireUser } from "@/lib/auth";
 import { buildSnapshot } from "@/lib/chat";
+import { getConfig } from "@/lib/config";
 import { getI18n } from "@/lib/i18n-server";
 import { getBaseUrl } from "@/lib/request";
 import { getAccessibleRoom, getOwnerMember, listMembers } from "@/lib/rooms";
@@ -33,19 +34,28 @@ export default async function RoomPage({ params }: { params: Promise<{ id: strin
 
   /* ------------------------------ 1:1 private chat ------------------------------ */
   if (room.type === "dm") {
-    const [settings] = await Promise.all([getSettings()]);
-    const peerRows = await db
-      .select({ username: users.username, displayName: users.displayName })
-      .from(roomMembers)
-      .innerJoin(users, eq(users.id, roomMembers.userId))
-      .where(
-        and(
-          eq(roomMembers.roomId, room.id),
-          eq(roomMembers.role, "owner"),
-          ne(roomMembers.userId, user.id),
+    const config = getConfig();
+    const [settings, peerRows, participantKeys] = await Promise.all([
+      getSettings(),
+      db
+        .select({ username: users.username, displayName: users.displayName, userId: roomMembers.userId })
+        .from(roomMembers)
+        .innerJoin(users, eq(users.id, roomMembers.userId))
+        .where(
+          and(
+            eq(roomMembers.roomId, room.id),
+            eq(roomMembers.role, "owner"),
+            ne(roomMembers.userId, user.id),
+          ),
+        )
+        .limit(1),
+      db
+        .select({ userId: e2eeKeys.userId })
+        .from(e2eeKeys)
+        .where(
+          sql`${e2eeKeys.userId} in (select user_id from room_members where room_id = ${room.id} and user_id is not null)`,
         ),
-      )
-      .limit(1);
+    ]);
     // Fallback when the peer account no longer exists: keep the stored name.
     const peerName = peerRows[0]?.displayName ?? room.name;
     const snapshot = await buildSnapshot(room, viewer, 0, null, {
@@ -57,9 +67,15 @@ export default async function RoomPage({ params }: { params: Promise<{ id: strin
     return (
       <DmWorkspace
         roomId={room.id}
-        peer={{ displayName: peerName, username: peerRows[0]?.username ?? null }}
+        peer={{ displayName: peerName, username: peerRows[0]?.username ?? "" }}
         snapshot={snapshot}
         maxLength={settings.maxMessageLength}
+        e2ee={{
+          enabled: room.e2eeEnabled,
+          meHasKey: participantKeys.some((k) => k.userId === user.id),
+          peerHasKey: peerRows[0]?.userId ? participantKeys.some((k) => k.userId === peerRows[0].userId) : false,
+          featureEnabled: config.e2eeEnabled,
+        }}
       />
     );
   }
@@ -84,6 +100,7 @@ export default async function RoomPage({ params }: { params: Promise<{ id: strin
         hasPassword: Boolean(room.passwordHash),
         isLocked: room.isLocked,
         isDisabled: room.isDisabled,
+        defaultTtl: room.defaultTtl ?? null,
       }}
       snapshot={snapshot}
       members={members

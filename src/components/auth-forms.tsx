@@ -1,9 +1,12 @@
 "use client";
 
+import { useActionState, useState } from "react";
 import Link from "next/link";
-import { loginAction, registerAction } from "@/app/actions/auth";
+import { login2faAction, loginAction, registerAction } from "@/app/actions/auth";
 import { useI18n } from "./i18n-provider";
+import { errorText } from "@/lib/i18n";
 import { ActionForm, PasswordInput, SubmitButton } from "./ui";
+import type { ActionState } from "@/lib/utils";
 
 function RememberMe() {
   const { t } = useI18n();
@@ -18,11 +21,62 @@ function RememberMe() {
   );
 }
 
+/**
+ * Login with an optional TWO-FACTOR step: when the account has 2FA enabled,
+ * the password check returns a short-lived pre-auth token and this form swaps
+ * to the verification-code step instead of signing in directly.
+ */
 export function LoginForm() {
   const { t } = useI18n();
+  const [state, formAction, pending] = useActionState<ActionState, FormData>(loginAction, {});
+  const [state2, formAction2, pending2] = useActionState<ActionState, FormData>(login2faAction, {});
+  const [remember, setRemember] = useState(false);
+  const preAuthToken = typeof state.data?.preAuthToken === "string" ? state.data.preAuthToken : null;
+  const in2faStep = Boolean(state.ok && preAuthToken);
+
+  if (in2faStep) {
+    return (
+      <form action={formAction2} className="space-y-5">
+        <div className="rounded-2xl border border-line bg-surface-2/60 p-4 text-center">
+          <p className="text-sm font-extrabold text-ink">{t.twofactor.loginTitle}</p>
+          <p className="mt-1 text-xs leading-relaxed text-muted">{t.twofactor.loginText}</p>
+        </div>
+        <input type="hidden" name="preAuthToken" value={preAuthToken ?? ""} />
+        <input type="hidden" name="remember" value={remember ? "on" : ""} />
+        <div>
+          <label className="label" htmlFor="code">
+            {t.twofactor.loginCode}
+          </label>
+          <input
+            id="code"
+            name="code"
+            className="input text-center font-mono text-lg tracking-[0.3em]"
+            autoComplete="one-time-code"
+            inputMode="numeric"
+            pattern="[0-9A-Za-z-]{6,12}"
+            maxLength={12}
+            required
+            autoFocus
+            dir="ltr"
+            placeholder="••••••"
+          />
+        </div>
+        {state2.error ? (
+          <p role="alert" className="notice notice-rose pop-in">
+            {errorText(t, state2.error)}
+          </p>
+        ) : null}
+        <button type="submit" className="btn btn-primary btn-lg w-full" disabled={pending2} aria-busy={pending2}>
+          {pending2 ? <span className="spinner" aria-hidden="true" /> : null}
+          {t.auth.submitLogin}
+        </button>
+      </form>
+    );
+  }
+
   return (
     <>
-      <ActionForm action={loginAction} className="space-y-5">
+      <form action={formAction} className="space-y-5">
         <div>
           <label className="label" htmlFor="username">
             {t.auth.username}
@@ -45,9 +99,29 @@ export function LoginForm() {
           </label>
           <PasswordInput name="password" autoComplete="current-password" />
         </div>
-        <RememberMe />
-        <SubmitButton className="btn btn-primary btn-lg w-full">{t.auth.submitLogin}</SubmitButton>
-      </ActionForm>
+        <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-line bg-surface-2 p-3.5 transition hover:border-line-strong">
+          <input
+            type="checkbox"
+            name="remember"
+            className="checkbox mt-0.5"
+            checked={remember}
+            onChange={(e) => setRemember(e.target.checked)}
+          />
+          <span>
+            <span className="block text-sm font-bold text-ink">{t.auth.remember}</span>
+            <span className="mt-0.5 block text-xs leading-relaxed text-muted">{t.auth.rememberHint}</span>
+          </span>
+        </label>
+        {state.error ? (
+          <p role="alert" className="notice notice-rose pop-in">
+            {errorText(t, state.error)}
+          </p>
+        ) : null}
+        <button type="submit" className="btn btn-primary btn-lg w-full" disabled={pending} aria-busy={pending}>
+          {pending ? <span className="spinner" aria-hidden="true" /> : null}
+          {t.auth.submitLogin}
+        </button>
+      </form>
       <p className="mt-7 text-center text-sm text-muted">
         {t.auth.noAccount}{" "}
         <Link href="/register" className="font-bold text-accent-ink hover:underline">

@@ -187,6 +187,75 @@ export async function adminAction(_prev: ActionState, formData: FormData): Promi
       await audit("bot.config", { details: `enabled=${telegramEnabled} paid=${telegramPaid}` });
       break;
     }
+    case "bot.settings": {
+      // §6.5 — everything the admin can tune about bot behaviour.
+      const rawRoom = String(formData.get("defaultRoomId") ?? "");
+      let defaultRoomId: string | null = null;
+      if (isUuid(rawRoom)) {
+        const [room] = await db.select({ type: rooms.type }).from(rooms).where(eq(rooms.id, rawRoom)).limit(1);
+        if (!room || room.type !== "room") return { error: "notFound" };
+        defaultRoomId = rawRoom;
+      }
+      const botAdmins = String(formData.get("botAdmins") ?? "")
+        .split(/[\s,;]+/)
+        .map((a) => a.replace(/[^0-9-]/g, "").slice(0, 32))
+        .filter(Boolean);
+      const { updateBotSettings } = await import("@/lib/telegram/bot-settings");
+      await updateBotSettings({
+        defaultRoomId,
+        fallbackEnabled: formData.get("fallbackEnabled") === "on",
+        allowRoomSend: formData.get("allowRoomSend") === "on",
+        allowBotDm: formData.get("allowBotDm") === "on",
+        startText: String(formData.get("startText") ?? "").slice(0, 1500),
+        helpText: String(formData.get("helpText") ?? "").slice(0, 3000),
+        fallbackAckText: String(formData.get("fallbackAckText") ?? "✓ Delivered to {room}").slice(0, 300) || "✓ Delivered to {room}",
+        botAdmins,
+        commandRatePerMin: intOrNull(formData.get("commandRatePerMin"), 3, 60) ?? 20,
+      });
+      await audit("bot.settings", {
+        details: `default=${defaultRoomId ?? "none"} fallback=${formData.get("fallbackEnabled") === "on"} admins=${botAdmins.length}`,
+      });
+      break;
+    }
+    case "webhook.set": {
+      const { getBotSettings } = await import("@/lib/telegram/bot-settings");
+      void getBotSettings;
+      const bot = await getPlatformBot();
+      if (!bot.configured) return { error: "telegramMissing" };
+      const { getBaseUrl } = await import("@/lib/request");
+      const base = (await getBaseUrl()).replace(/\/+$/, "");
+      if (!/^https:/.test(base)) return { error: "invalidInput" };
+      const secret = (process.env.WEBHOOK_SECRET ?? "").trim();
+      if (!secret || secret.length < 16) return { error: "invalidInput" };
+      try {
+        await tg(bot.token, "setWebhook", {
+          url: `${base}/api/telegram/webhook/platform`,
+          secret_token: secret,
+          allowed_updates: ["message", "callback_query"],
+          drop_pending_updates: false,
+        });
+        // Polling and webhook cannot run together.
+        process.env.TELEGRAM_POLLING = "off";
+        (globalThis as typeof globalThis & { __pcPollerSync?: () => void }).__pcPollerSync?.();
+        await audit("webhook.set", { details: base });
+      } catch {
+        return { error: "telegramUnreachable" };
+      }
+      break;
+    }
+    case "webhook.delete": {
+      const bot = await getPlatformBot();
+      if (!bot.configured) return { error: "telegramMissing" };
+      try {
+        await tg(bot.token, "deleteWebhook", { drop_pending_updates: false });
+        delete process.env.TELEGRAM_POLLING;
+        (globalThis as typeof globalThis & { __pcPollerSync?: () => void }).__pcPollerSync?.();
+        await audit("webhook.delete");
+      } catch {
+        return { error: "telegramUnreachable" };
+      }
+      break;
+    }
     case "link.unlink": {
       const [link] = await db.delete(telegramLinks).where(eq(telegramLinks.id, id)).returning();
       if (!link) return { error: "notFound" };

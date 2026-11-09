@@ -1,13 +1,15 @@
 import type { Metadata } from "next";
-import { KeyRound, Laptop, LogOut, Smartphone, TriangleAlert, UserRound } from "lucide-react";
+import { KeyRound, Laptop, LogOut, Smartphone, TriangleAlert, UserRound, X } from "lucide-react";
 import { and, desc, eq, gt } from "drizzle-orm";
 import { db } from "@/db";
 import { rooms, sessions } from "@/db/schema";
-import { changePasswordAction, deleteAccountAction, signOutOthersAction, updateProfileAction } from "@/app/actions/account";
+import { changePasswordAction, deleteAccountAction, revokeSessionAction, signOutOthersAction, updateProfileAction } from "@/app/actions/account";
 import { Avatar } from "@/components/brand";
 import { InstallAppCard } from "@/components/pwa";
 import { VersionTap } from "@/components/privacy";
 import { TelegramCard } from "@/components/dashboard/telegram-card";
+import { TwoFactorCard } from "@/components/security/twofactor-card";
+import { SecurityCard } from "@/components/security/security-card";
 import { ActionForm, LocalTime, PasswordInput, SubmitButton } from "@/components/ui";
 import { requireUser } from "@/lib/auth";
 import { formatNumber } from "@/lib/i18n";
@@ -15,6 +17,7 @@ import { getI18n } from "@/lib/i18n-server";
 import { getSettings } from "@/lib/settings";
 import { getPlatformBot } from "@/lib/telegram/platform";
 import { BOT_COMMANDS, linkForUser } from "@/lib/telegram/service";
+import { is2faEnabled } from "@/lib/twofactor";
 import { fmt } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
@@ -54,7 +57,7 @@ function describeAgent(ua: string | null) {
 export default async function AccountPage() {
   const user = await requireUser();
   const { t, lang } = await getI18n();
-  const [list, ownedRooms, settings, link, bot] = await Promise.all([
+  const [list, ownedRooms, settings, link, bot, twofa] = await Promise.all([
     db
       .select()
       .from(sessions)
@@ -64,6 +67,7 @@ export default async function AccountPage() {
     getSettings(),
     linkForUser(user.id),
     getPlatformBot(),
+    is2faEnabled(user.id),
   ]);
 
   let mutedRooms: Array<{ id: string; name: string }> = [];
@@ -186,12 +190,25 @@ export default async function AccountPage() {
                   <div className="flex flex-col items-end gap-1">
                     {s.id === user.sessionId ? <span className="badge badge-mint">{t.account.thisDevice}</span> : null}
                     <span className="badge badge-neutral">{s.persistent ? t.account.remembered : t.account.untilRefresh}</span>
+                    {s.id !== user.sessionId ? (
+                      <ActionForm action={revokeSessionAction} showMessage={false}>
+                        <input type="hidden" name="sessionId" value={s.id} />
+                        <SubmitButton className="btn btn-ghost btn-sm" title={t.security.revokeSession}>
+                          <X className="size-3.5" />
+                          {t.security.revokeSession}
+                        </SubmitButton>
+                      </ActionForm>
+                    ) : null}
                   </div>
                 </li>
               );
             })}
           </ul>
         </section>
+
+        <TwoFactorCard enabled={twofa} />
+
+        <SecurityCard />
 
         <TelegramCard
           telegramEnabled={settings.telegramEnabled}
@@ -204,6 +221,7 @@ export default async function AccountPage() {
                   chatName: link.chatName,
                   username: link.username,
                   forwardEnabled: link.forwardEnabled,
+                  allowBotDm: link.allowBotDm,
                   mutedRooms,
                 }
               : null

@@ -4,6 +4,7 @@ import { desc, eq, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
   auditLogs,
+  deletedAccounts,
   files,
   messages,
   platformSettings,
@@ -16,26 +17,34 @@ import {
 } from "@/db/schema";
 import { audit } from "./audit";
 import { getPlatformBot } from "./telegram/platform";
+import {
+  backupKeyFingerprint,
+  decryptBackup,
+  deriveBackupKey,
+  encryptBackup,
+  isEncryptedBackup,
+} from "./backup-crypto";
 
 /**
- * Full-platform backup & restore.
+ * Full-platform backup & restore — now with AES-256-GCM AT-REST ENCRYPTION.
  *
  * Every night at a configurable hour (Asia/Tehran) the app packs ALL durable
- * data — users, rooms, members, messages, uploaded media (base64), Telegram bot
+ * data — users, rooms, members, messages, uploaded media (base64), Telegram
  * integrations, platform settings and the audit log — into one gzipped JSON
- * archive and sends it to the owner's private Telegram chat via the super-admin
- * bot. Archives larger than one Telegram document are split into numbered parts
- * that reassemble on restore.
+ * archive, encrypts it with a dedicated backup key (BACKUP_ENCRYPTION_KEY, or
+ * domain-separated from APP_SECRET) and sends it to the owner's private
+ * Telegram chat via the super-admin bot. Telegram only ever sees ciphertext.
  *
  * Restoring (/restore in the bot, or a fresh deployment pointing at the same
- * bot) wipes the current tables and replays the archive inside one transaction,
- * so a dead Railway account never means dead data.
+ * bot) wipes the current tables and replays the archive inside one transaction
+ * — including legacy plaintext (v3) archives — then RE-APPLIES account-deletion
+ * tombstones so emergency-deleted accounts stay deleted.
  *
  * Ephemeral tables (sessions, admin_sessions) are deliberately NOT backed up.
  */
 
 const BACKUP_FORMAT = "panda-chat-backup";
-const BACKUP_VERSION = 3;
+const BACKUP_VERSION = 4;
 /** Telegram bots can DOWNLOAD files up to 20MB via getFile — keep parts below it. */
 const PART_BYTES = 17 * 1024 * 1024;
 const TZ = "Asia/Tehran";
@@ -120,6 +129,17 @@ export async function allowedChatIds(): Promise<string[]> {
   return [...new Set([...backupChatIds(), config.chatId].filter(Boolean))];
 }
 
+/** The backup encryption key: BACKUP_ENCRYPTION_KEY (preferred, kept offline) or APP_SECRET-derived. */
+export function backupEncryptionKey(): Buffer {
+  const custom = (process.env.BACKUP_ENCRYPTION_KEY ?? "").trim();
+  return deriveBackupKey(custom || (process.env.APP_SECRET ?? "").trim() || "panda-chat-dev-secret");
+}
+
+/** Fingerprint of the active backup key — safe to show in the admin panel. */
+export function backupKeyHint(): string {
+  return backupKeyFingerprint(backupEncryptionKey());
+}
+
 /* ------------------------------------------------------------------ */
 /* Snapshot build                                                      */
 /* ------------------------------------------------------------------ */
@@ -133,7 +153,7 @@ type BackupPayload = {
 };
 
 async function buildPayload(): Promise<BackupPayload> {
-  const [userRows, roomRows, memberRows, fileRows, messageRows, botRows, linkRows, codeRows, settingsRows, auditRows] = await Promise.all([
+  const [userRows, roomRows, memberRows, fileRows, messageRows, botRows, linkRows, codeRows, settingsRows, auditRows, tombstoneRows] = await Promise.all([
     db.select().from(users),
     db.select().from(rooms),
     db.select().from(roomMembers),
@@ -156,6 +176,7 @@ async function buildPayload(): Promise<BackupPayload> {
     db.select().from(telegramLinkCodes),
     db.select().from(platformSettings),
     db.select().from(auditLogs).orderBy(desc(auditLogs.id)).limit(5000),
+    db.select().from(deletedAccounts),
   ]);
 
   const fileB64 = (data: Buffer | Uint8Array | null | undefined) =>
@@ -172,6 +193,7 @@ async function buildPayload(): Promise<BackupPayload> {
     telegramLinkCodes: codeRows,
     platformSettings: settingsRows.filter((s) => s.key !== LAST_RESULT_KEY),
     auditLogs: auditRows,
+    deletedAccounts: tombstoneRows,
   };
   const counts = Object.fromEntries(Object.entries(tables).map(([k, v]) => [k, v.length]));
   return {
@@ -264,22 +286,26 @@ export async function runBackup(reason: "scheduled" | "manual"): Promise<BackupR
     const payload = await buildPayload();
     const json = Buffer.from(JSON.stringify(payload), "utf8");
     const gz = gzipSync(json, { level: 6 });
-    const sha = createHash("sha256").update(gz).digest("hex");
+    // ENCRYPT: Telegram must never see plaintext user data (audit §3.6).
+    const key = backupEncryptionKey();
+    const enc = encryptBackup(key, gz);
+    const sha = createHash("sha256").update(enc).digest("hex");
     const base = `panda-backup-${stamp()}`;
-    const parts = Math.max(1, Math.ceil(gz.length / PART_BYTES));
+    const parts = Math.max(1, Math.ceil(enc.length / PART_BYTES));
     const countsLine = Object.entries(payload.counts)
       .map(([k, v]) => `${k}=${v}`)
       .join(" · ");
 
     for (let i = 0; i < parts; i++) {
-      const slice = gz.subarray(i * PART_BYTES, Math.min(gz.length, (i + 1) * PART_BYTES));
-      const name = parts > 1 ? `${base}.part${i + 1}of${parts}.pcbak` : `${base}.pcbak`;
+      const slice = enc.subarray(i * PART_BYTES, Math.min(enc.length, (i + 1) * PART_BYTES));
+      const name = parts > 1 ? `${base}.part${i + 1}of${parts}.pcbak.enc` : `${base}.pcbak.enc`;
       const caption =
-        `🗄 <b>Panda Chat backup</b> (${reason})\n` +
-        `📦 ${parts > 1 ? `part <b>${i + 1}/${parts}</b> · ` : ""}${(gz.length / 1048576).toFixed(2)} MB gzip · ` +
+        `🗄 <b>Panda Chat backup</b> (${reason}) · 🔒 <b>AES-256-GCM encrypted</b>\n` +
+        `📦 ${parts > 1 ? `part <b>${i + 1}/${parts}</b> · ` : ""}${(enc.length / 1048576).toFixed(2)} MB encrypted · ` +
         `${(json.length / 1048576).toFixed(2)} MB raw\n` +
         `🧾 ${countsLine}\n` +
-        `#️⃣ sha256 <code>${sha.slice(0, 16)}…</code>`;
+        `#️⃣ sha256 <code>${sha.slice(0, 16)}…</code>\n` +
+        `🔑 key fingerprint <code>${backupKeyFingerprint(key)}</code>`;
       const sent = await sendDocument(token, chatId, slice, name, caption);
       if (!sent.ok) return fail(`sendDocument failed on part ${i + 1}: ${sent.error}`);
     }
@@ -288,7 +314,7 @@ export async function runBackup(reason: "scheduled" | "manual"): Promise<BackupR
       at: new Date().toISOString(),
       ok: true,
       parts,
-      bytes: gz.length,
+      bytes: enc.length,
       sha256: sha,
       counts: payload.counts,
     };
@@ -350,11 +376,17 @@ export function ensureBackupLoop() {
 /* Restore                                                             */
 /* ------------------------------------------------------------------ */
 
+/**
+ * Unpacks an archive: auto-decrypts PCENC1 (v4) envelopes with the current
+ * backup key, accepts legacy plaintext gzip (v3) archives unchanged.
+ */
 export function unpackBackup(bytes: Buffer): { payload: BackupPayload; json: Buffer } {
+  let data = bytes;
+  if (isEncryptedBackup(data)) data = decryptBackup(backupEncryptionKey(), data);
   let json: Buffer;
   // Accept both raw gzip archives and plain JSON (tiny imports).
-  if (bytes.length > 2 && bytes[0] === 0x1f && bytes[1] === 0x8b) json = gunzipSync(bytes);
-  else json = bytes;
+  if (data.length > 2 && data[0] === 0x1f && data[1] === 0x8b) json = gunzipSync(data);
+  else json = data;
   const payload = JSON.parse(json.toString("utf8")) as BackupPayload;
   if (payload.app !== BACKUP_FORMAT) throw new Error("This file is not a Panda Chat backup");
   if (payload.version > BACKUP_VERSION) throw new Error(`Backup version ${payload.version} is newer than this app`);
@@ -436,6 +468,11 @@ export async function restoreFromBackup(bytes: Buffer): Promise<RestoreSummary> 
         .onConflictDoUpdate({ target: platformSettings.key, set: { value: currentBackupState, updatedAt: new Date() } });
     }
     for (const row of chunk(reviveRows(t.auditLogs ?? []), 300)) await tx.insert(auditLogs).values(row as never);
+    // Merge the archive's deletion tombstones with the ones already on this
+    // install (the table is NOT truncated) — deletions must outlive restores.
+    for (const row of reviveRows(t.deletedAccounts ?? [])) {
+      await tx.insert(deletedAccounts).values(row as never).onConflictDoNothing();
+    }
 
     await tx.execute(
       sql`select setval(pg_get_serial_sequence('messages', 'id'), greatest((select coalesce(max(id), 0) from messages), 1))`,
@@ -451,8 +488,18 @@ export async function restoreFromBackup(bytes: Buffer): Promise<RestoreSummary> 
   (globalThis as typeof globalThis & { __pcRateLimit?: Map<string, unknown> }).__pcRateLimit?.clear();
   (globalThis as typeof globalThis & { __pcPollerSync?: () => void }).__pcPollerSync?.();
 
+  // Re-apply the deletion policy for tombstoned users — an emergency-deleted
+  // account must NOT resurrect from an older backup.
+  let reapplied = 0;
+  try {
+    const { applyDeletionTombstones } = await import("./account-deletion");
+    reapplied = (await applyDeletionTombstones()).reapplied;
+  } catch (error) {
+    console.error("[panda-chat] tombstone re-application failed", error);
+  }
+
   await audit("backup.restored", {
-    details: `createdAt=${payload.createdAt} users=${payload.counts.users ?? 0} rooms=${payload.counts.rooms ?? 0}`,
+    details: `createdAt=${payload.createdAt} users=${payload.counts.users ?? 0} rooms=${payload.counts.rooms ?? 0} deletionsReapplied=${reapplied}`,
   }).catch(() => undefined);
 
   return { counts: payload.counts ?? {}, createdAt: payload.createdAt, sha256: "" };

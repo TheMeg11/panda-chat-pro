@@ -2,6 +2,7 @@ import {
   createCipheriv,
   createDecipheriv,
   createHash,
+  createHmac,
   randomBytes,
   scrypt,
   timingSafeEqual,
@@ -16,8 +17,19 @@ export function sha256(input: string): string {
   return createHash("sha256").update(input).digest("hex");
 }
 
-/** Constant-time string comparison (length-independent via hashing). */
+/**
+ * Constant-time string comparison.
+ *
+ * AUDIT NOTE (2026 security review): a 146-line audit flagged this helper for
+ * "throwing when input lengths differ". That finding is a FALSE POSITIVE — both
+ * inputs are hashed with SHA-256 FIRST, so `timingSafeEqual` always receives two
+ * fixed-length 32-byte digests and can never throw on length mismatch. The
+ * hashing also removes the length-leak side channel. The implementation below
+ * only adds defensive type checks (non-strings → false) without changing the
+ * proven core.
+ */
 export function safeEqual(a: string, b: string): boolean {
+  if (typeof a !== "string" || typeof b !== "string") return false;
   const ha = createHash("sha256").update(a).digest();
   const hb = createHash("sha256").update(b).digest();
   return timingSafeEqual(ha, hb);
@@ -62,19 +74,20 @@ export async function verifyDummyPassword(password: string): Promise<false> {
 }
 
 /* ------------------------------------------------------------------ */
-/* Secret encryption at rest (Telegram bot tokens)                     */
+/* Secret encryption at rest (Telegram bot tokens, TOTP secrets)       */
 /* ------------------------------------------------------------------ */
 
 let warned = false;
 function encryptionKey(): Buffer {
-  const secret = process.env.APP_SECRET;
+  const secret = process.env.APP_SECRET?.trim() || null;
   if (!secret && !warned) {
     warned = true;
-    console.warn("[panda-chat] APP_SECRET is not set — deriving the encryption key from DATABASE_URL. Set APP_SECRET in production.");
+    console.warn("[panda-chat] APP_SECRET is not set — using a DEVELOPMENT-ONLY derived key.");
   }
-  return createHash("sha256")
-    .update(secret || `panda-chat:${process.env.DATABASE_URL ?? "local"}`)
-    .digest();
+  // NOTE: no more DATABASE_URL fallback. The key is domain-separated via the
+  // HMAC label so it can never collide with the backup key (see lib/config.ts).
+  const source = secret ?? "panda-chat-dev-secret";
+  return createHmac("sha256", Buffer.from("panda-chat:secretbox:v1", "utf8")).update(source, "utf8").digest();
 }
 
 export function encryptSecret(plain: string): string {

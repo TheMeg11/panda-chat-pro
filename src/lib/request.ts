@@ -51,14 +51,57 @@ export async function getBaseUrl(): Promise<string> {
   return (await requestMeta()).origin;
 }
 
-/** Basic CSRF defence for JSON route handlers: browsers always send Origin on POST/DELETE. */
+/**
+ * CSRF defence for JSON route handlers.
+ *
+ * Layers (hardened 2026):
+ *  1. `Sec-Fetch-Site` (modern browsers): anything other than "same-origin"
+ *     (or "none" for typed URLs / bookmarks) is rejected outright.
+ *  2. `Origin` header: must be present for browser POST/DELETE/PUT and must
+ *     match the Host / X-Forwarded-Host exactly (scheme-agnostic host:port).
+ *  3. Missing Origin is only tolerated when Sec-Fetch-Site is absent or
+ *     explicitly "none" — a plain cross-site request without Origin cannot
+ *     carry ambient cookies in practice.
+ * Non-browser clients (Telegram webhooks, curl) never send Sec-Fetch-Site and
+ * are authenticated by their own secrets instead.
+ */
 export function isSameOrigin(req: Request): boolean {
+  const fetchSite = req.headers.get("sec-fetch-site");
+  if (fetchSite) {
+    if (fetchSite === "same-origin" || fetchSite === "none") {
+      // Same-origin or an explicit top-level navigation: also check Origin when present.
+      const origin = req.headers.get("origin");
+      if (!origin) return true;
+      return originMatchesHost(origin, req);
+    }
+    return false; // cross-site, same-origin-cross-site — reject
+  }
+
   const origin = req.headers.get("origin");
-  if (!origin) return true;
+  if (!origin) return true; // legacy browser or non-browser client
+  if (origin === "null") return false; // opaque origin (sandboxed iframe / data URL)
+  return originMatchesHost(origin, req);
+}
+
+function originMatchesHost(origin: string, req: Request): boolean {
   const host = trusted(req.headers.get("x-forwarded-host")) || req.headers.get("host");
+  if (!host) return false;
   try {
-    return new URL(origin).host === host;
+    const originUrl = new URL(origin);
+    const originHost = originUrl.host.toLowerCase();
+    const reqHost = host.toLowerCase();
+    if (originHost === reqHost) return true;
+    // Proxies sometimes forward the host without the port while the origin keeps
+    // the default port (https://x.com vs x.com:443). Compare default-port-free.
+    return stripDefaultPort(originHost, originUrl.protocol) === stripDefaultPort(reqHost, originUrl.protocol);
   } catch {
     return false;
   }
+}
+
+function stripDefaultPort(host: string, protocol: string): string {
+  const [hostname, port] = host.split(":");
+  if (!port) return hostname;
+  const isDefault = (protocol === "https:" && port === "443") || (protocol !== "https:" && port === "80");
+  return isDefault ? hostname : host;
 }

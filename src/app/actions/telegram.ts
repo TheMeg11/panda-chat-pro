@@ -61,3 +61,18 @@ export async function telegramForwardAction(_prev: ActionState, formData: FormDa
   revalidatePath("/dashboard/settings");
   return { ok: true, message: enabled ? "account.tgForwardOn" : "account.tgForwardOff" };
 }
+
+/** §6.2 consent switch: can OTHER linked users reach me with /msg? */
+export async function telegramBotDmAction(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  const user = await getCurrentUser();
+  if (!user) return { error: "unauthorized" };
+  const enabled = formData.get("enabled") === "1";
+  const updated = await db
+    .update(telegramLinks)
+    .set({ allowBotDm: enabled, updatedAt: new Date() })
+    .where(eq(telegramLinks.userId, user.id))
+    .returning({ id: telegramLinks.id });
+  if (updated.length === 0) return { error: "telegramNotLinked" };
+  revalidatePath("/dashboard/settings");
+  return { ok: true, message: enabled ? "account.tgBotDmOn" : "account.tgBotDmOff" };
+}

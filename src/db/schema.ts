@@ -70,6 +70,115 @@ export const adminSessions = pgTable("admin_sessions", {
 });
 
 /* ------------------------------------------------------------------ */
+/* Two-factor authentication (TOTP + recovery codes)                    */
+/* ------------------------------------------------------------------ */
+
+/** TOTP secret per account — AES-256-GCM encrypted at rest (APP_SECRET). */
+export const twoFactor = pgTable("two_factor", {
+  userId: uuid("user_id")
+    .primaryKey()
+    .references(() => users.id, { onDelete: "cascade" }),
+  /** AES-256-GCM encrypted base32 TOTP secret (encryptSecret) */
+  secretEncrypted: text("secret_encrypted").notNull(),
+  /** pending until the first successful code verification */
+  enabledAt: ts("enabled_at"),
+  createdAt: ts("created_at").notNull().defaultNow(),
+  updatedAt: ts("updated_at").notNull().defaultNow(),
+});
+
+/** One-time recovery codes — only sha256 hashes are stored. */
+export const recoveryCodes = pgTable(
+  "recovery_codes",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    /** sha256 of the 10-char code shown to the user exactly once */
+    codeHash: varchar("code_hash", { length: 64 }).notNull(),
+    usedAt: ts("used_at"),
+    createdAt: ts("created_at").notNull().defaultNow(),
+  },
+  (t) => [index("recovery_codes_user_idx").on(t.userId)],
+);
+
+/* ------------------------------------------------------------------ */
+/* Interactive onboarding tutorial state                                */
+/* ------------------------------------------------------------------ */
+
+/** Per-user tutorial progress so the tour shows exactly once per version. */
+export const userOnboarding = pgTable("user_onboarding", {
+  userId: uuid("user_id")
+    .primaryKey()
+    .references(() => users.id, { onDelete: "cascade" }),
+  /** tutorial content version the user last saw */
+  tutorialVersion: integer("tutorial_version").notNull().default(1),
+  /** pending | completed | skipped */
+  status: varchar("status", { length: 16 }).notNull().default("pending"),
+  completedAt: ts("completed_at"),
+  updatedAt: ts("updated_at").notNull().defaultNow(),
+});
+
+/* ------------------------------------------------------------------ */
+/* End-to-end encryption key material (client-generated, server-blind)   */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Per-user E2EE identity: the PUBLIC key is stored in the clear so peers can
+ * encrypt; the PRIVATE key is stored wrapped with a key derived from the
+ * account password via PBKDF2 IN THE BROWSER — the server never sees either
+ * the raw private key or the password-derived wrapping key.
+ */
+export const e2eeKeys = pgTable("e2ee_keys", {
+  userId: uuid("user_id")
+    .primaryKey()
+    .references(() => users.id, { onDelete: "cascade" }),
+  /** JSON Web Key (public ECDH P-256 key) */
+  publicKeyJwk: text("public_key_jwk").notNull(),
+  /** AES-GCM ciphertext of the private JWK, wrapped by the client */
+  wrappedPrivateKey: text("wrapped_private_key").notNull(),
+  /** base64url PBKDF2 salt used by the client to derive the wrapping key */
+  kdfSalt: varchar("kdf_salt", { length: 64 }).notNull(),
+  /** PBKDF2 iteration count (client-side, can be raised over time) */
+  kdfIterations: integer("kdf_iterations").notNull().default(310_000),
+  /** key scheme version for future rotation */
+  keyVersion: integer("key_version").notNull().default(1),
+  createdAt: ts("created_at").notNull().defaultNow(),
+  updatedAt: ts("updated_at").notNull().defaultNow(),
+});
+
+/* ------------------------------------------------------------------ */
+/* Distributed rate limiting (Postgres-backed, multi-instance safe)     */
+/* ------------------------------------------------------------------ */
+
+/** Shared fixed-window buckets so every server instance counts together. */
+export const rateLimitBuckets = pgTable(
+  "rate_limit_buckets",
+  {
+    /** `<scope>:<key>` identifier */
+    bucketKey: varchar("bucket_key", { length: 200 }).primaryKey(),
+    count: integer("count").notNull().default(0),
+    /** epoch ms when the current window ends */
+    resetAt: bigint("reset_at", { mode: "number" }).notNull(),
+  },
+  (t) => [index("rate_limit_reset_idx").on(t.resetAt)],
+);
+
+/* ------------------------------------------------------------------ */
+/* Account deletion tombstones (survive restores)                        */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Users who emergency-deleted their account. Restore re-applies the deletion
+ * policy for these ids so deleted accounts cannot come back from a backup.
+ */
+export const deletedAccounts = pgTable("deleted_accounts", {
+  userId: uuid("user_id").primaryKey(),
+  username: varchar("username", { length: 32 }).notNull(),
+  deletedAt: ts("deleted_at").notNull().defaultNow(),
+});
+
+/* ------------------------------------------------------------------ */
 /* Rooms                                                               */
 /* ------------------------------------------------------------------ */
 
@@ -96,6 +205,10 @@ export const rooms = pgTable(
     isDisabled: boolean("is_disabled").notNull().default(false),
     /** bumped on structural changes (deletes, clears) so clients resync */
     stateVersion: integer("state_version").notNull().default(0),
+    /** E2EE flag — only DMs; when true the server stores ciphertext only */
+    e2eeEnabled: boolean("e2ee_enabled").notNull().default(false),
+    /** default self-destruct TTL in seconds (null = off; 3600 | 86400 | 604800) */
+    defaultTtl: integer("default_ttl"),
     createdAt: ts("created_at").notNull().defaultNow(),
     updatedAt: ts("updated_at").notNull().defaultNow(),
     lastActivityAt: ts("last_activity_at").notNull().defaultNow(),
@@ -171,6 +284,10 @@ export const messages = pgTable(
     /** message id of the forwarded copy inside the owner's Telegram chat */
     tgMessageId: bigint("tg_message_id", { mode: "number" }),
     deletedAt: ts("deleted_at"),
+    /** self-destruct deadline — null means "keep"; set from room defaultTtl or per-send override */
+    expiresAt: ts("expires_at"),
+    /** true when body is an E2EE envelope the server cannot read */
+    encrypted: boolean("encrypted").notNull().default(false),
     createdAt: ts("created_at").notNull().defaultNow(),
   },
   (t) => [
@@ -230,6 +347,10 @@ export const telegramLinks = pgTable(
     username: varchar("username", { length: 64 }),
     /** room the bot commands currently act on */
     activeRoomId: uuid("active_room_id").references(() => rooms.id, { onDelete: "set null" }),
+    /** per-user fallback destination override (null = platform default room) */
+    fallbackRoomId: uuid("fallback_room_id").references(() => rooms.id, { onDelete: "set null" }),
+    /** allow OTHER linked users to reach this account via /msg (opt-in) */
+    allowBotDm: boolean("allow_bot_dm").notNull().default(false),
     /** master switch for message forwarding */
     forwardEnabled: boolean("forward_enabled").notNull().default(true),
     /** rooms muted for notifications (uuid strings) */

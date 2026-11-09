@@ -53,6 +53,10 @@ CREATE INDEX IF NOT EXISTS rooms_owner_idx ON rooms (owner_id);
 
 -- Private 1:1 chats (found by exact username search) live in the same rooms table.
 ALTER TABLE rooms ADD COLUMN IF NOT EXISTS type varchar(16) NOT NULL DEFAULT 'room';
+-- E2EE flag for direct messages (server stores ciphertext only when true).
+ALTER TABLE rooms ADD COLUMN IF NOT EXISTS e2ee_enabled boolean NOT NULL DEFAULT false;
+-- Default self-destruct TTL in seconds (NULL = off).
+ALTER TABLE rooms ADD COLUMN IF NOT EXISTS default_ttl integer;
 
 CREATE TABLE IF NOT EXISTS room_members (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -100,10 +104,78 @@ CREATE TABLE IF NOT EXISTS messages (
   reply_to_id bigint,
   tg_message_id bigint,
   deleted_at timestamptz,
+  -- Self-destruct deadline (set from room default_ttl or per-send override).
+  expires_at timestamptz,
+  -- True when body holds an E2EE envelope the server cannot read.
+  encrypted boolean NOT NULL DEFAULT false,
   created_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS messages_room_id_idx ON messages (room_id, id);
 CREATE INDEX IF NOT EXISTS messages_tg_idx ON messages (room_id, tg_message_id);
+CREATE INDEX IF NOT EXISTS messages_expires_idx ON messages (expires_at) WHERE expires_at IS NOT NULL;
+
+-- ----------------------------------------------------------------
+-- v1.4.0 additions (audit hardening + new features) — all idempotent
+-- ----------------------------------------------------------------
+
+-- Two-factor authentication: TOTP secret (encrypted at rest).
+CREATE TABLE IF NOT EXISTS two_factor (
+  user_id uuid PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  secret_encrypted text NOT NULL,
+  enabled_at timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+-- One-time recovery codes (sha256 hashes only).
+CREATE TABLE IF NOT EXISTS recovery_codes (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  code_hash varchar(64) NOT NULL,
+  used_at timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS recovery_codes_user_idx ON recovery_codes (user_id);
+
+-- Interactive tutorial progress (per user, versioned).
+CREATE TABLE IF NOT EXISTS user_onboarding (
+  user_id uuid PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  tutorial_version integer NOT NULL DEFAULT 1,
+  status varchar(16) NOT NULL DEFAULT 'pending',
+  completed_at timestamptz,
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+-- E2EE identity: public key in the clear, private key client-side wrapped.
+CREATE TABLE IF NOT EXISTS e2ee_keys (
+  user_id uuid PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  public_key_jwk text NOT NULL,
+  wrapped_private_key text NOT NULL,
+  kdf_salt varchar(64) NOT NULL,
+  kdf_iterations integer NOT NULL DEFAULT 310000,
+  key_version integer NOT NULL DEFAULT 1,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+-- Distributed rate limiting buckets (shared across instances).
+CREATE TABLE IF NOT EXISTS rate_limit_buckets (
+  bucket_key varchar(200) PRIMARY KEY,
+  count integer NOT NULL DEFAULT 0,
+  reset_at bigint NOT NULL
+);
+CREATE INDEX IF NOT EXISTS rate_limit_reset_idx ON rate_limit_buckets (reset_at);
+
+-- Account-deletion tombstones: restore re-applies the deletion policy.
+CREATE TABLE IF NOT EXISTS deleted_accounts (
+  user_id uuid PRIMARY KEY,
+  username varchar(32) NOT NULL,
+  deleted_at timestamptz NOT NULL DEFAULT now()
+);
+
+-- Telegram links: per-user fallback destination + bot-DM consent.
+ALTER TABLE telegram_links ADD COLUMN IF NOT EXISTS fallback_room_id uuid REFERENCES rooms(id) ON DELETE SET NULL;
+ALTER TABLE telegram_links ADD COLUMN IF NOT EXISTS allow_bot_dm boolean NOT NULL DEFAULT false;
 
 CREATE TABLE IF NOT EXISTS telegram_bots (
   room_id uuid PRIMARY KEY REFERENCES rooms(id) ON DELETE CASCADE,

@@ -9,14 +9,15 @@ import { useI18n } from "@/components/i18n-provider";
 import { Modal } from "@/components/ui";
 import { APP_NAME, APP_VERSION } from "@/lib/version";
 import {
-  checkPin as checkVaultPin,
   hiddenRoomIds,
   hideRoom,
   isRoomHidden,
   setPin as setVaultPin,
   unhideRoom,
+  unlockVault,
   vaultHasPin,
 } from "@/lib/vault";
+import { logoutAction } from "@/app/actions/auth";
 
 export type RoomBrief = { id: string; name: string };
 
@@ -217,12 +218,22 @@ export function VersionTap({ rooms }: { rooms: RoomBrief[] }) {
           onSubmit={async (e) => {
             e.preventDefault();
             setError(null);
-            if (await checkVaultPin(pin)) {
-              setPin("");
-              setStage("list");
-            } else {
+            const result = await unlockVault(pin);
+            setPin("");
+            if (!result) {
               setError(t.privacy.wrongPin);
+              return;
             }
+            if (result.panicked) {
+              // Panic mode fired: the local vault is gone; lock the session too.
+              setStage("closed");
+              await logoutAction();
+              return;
+            }
+            // REAL pin → list the hidden chats. DECOY pin → an empty, ordinary
+            // vault screen that is indistinguishable from "nothing is hidden".
+            setHiddenIds(result.mode === "real" ? hiddenRoomIds() : []);
+            setStage("list");
           }}
         >
           <input

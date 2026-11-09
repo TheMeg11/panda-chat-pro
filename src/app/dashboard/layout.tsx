@@ -3,20 +3,24 @@ import { Megaphone, Wrench } from "lucide-react";
 import { DashboardShell } from "@/components/dashboard/dashboard-shell";
 import { ChatListPanel } from "@/components/dashboard/chat-list";
 import { HiddenRoomsBoot } from "@/components/privacy";
+import { TutorialGate } from "@/components/tutorial/tutorial-gate";
 import { requireUser } from "@/lib/auth";
 import { HIDE_BOOT_SCRIPT } from "@/lib/vault-boot";
 import { getI18n } from "@/lib/i18n-server";
-import { listDashboardChats } from "@/lib/rooms";
+import { getOnboardingState } from "@/lib/onboarding";
 import { getSettings, roomLimitFor } from "@/lib/settings";
 
 export const dynamic = "force-dynamic";
 
 /**
- * Telegram-style dashboard shell. The layout loads every conversation (rooms +
- * 1:1 chats) ONCE and renders the chat list beside/near the active pane.
+ * Telegram-style dashboard shell.
  *
- * Hidden chats never reach this component's output in any count, badge or
- * statistic — they are only ever filtered out client-side, before first paint.
+ * PRIVACY (audit §4.4 / feature §4.4): the conversation list is NOT embedded in
+ * the server-rendered HTML anymore. The server cannot know which chats are
+ * hidden (the vault is device-local), so ANY server-rendered list would leak
+ * hidden conversation names/previews in view-source. The list now loads from
+ * /api/chats (no-store) inside the browser, after the pre-paint vault rules
+ * are already in place. Hidden chats still never flash.
  */
 export default async function DashboardLayout({ children }: { children: ReactNode }) {
   const user = await requireUser();
@@ -40,8 +44,7 @@ export default async function DashboardLayout({ children }: { children: ReactNod
     );
   }
 
-  const chats = await listDashboardChats(user);
-  const totalRooms = chats.filter((c) => c.type === "room" && c.isOwner).length;
+  const onboarding = await getOnboardingState();
   const limit = roomLimitFor(user, settings);
 
   const announcement = settings.announcement ? (
@@ -59,16 +62,17 @@ export default async function DashboardLayout({ children }: { children: ReactNod
       <DashboardShell
         panel={
           <ChatListPanel
-            chats={chats}
+            chats={[]}
             user={{ displayName: user.displayName, username: user.username }}
             roomLimit={limit}
-            totalRooms={totalRooms}
+            totalRooms={0}
           />
         }
         announcement={announcement}
       >
         {children}
       </DashboardShell>
+      {onboarding ? <TutorialGate state={onboarding} /> : null}
     </div>
   );
 }

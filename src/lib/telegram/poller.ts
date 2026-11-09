@@ -1,3 +1,6 @@
+import { eq } from "drizzle-orm";
+import { db } from "@/db";
+import { platformSettings } from "@/db/schema";
 import { getSettings } from "../settings";
 import { getPlatformBot, recordPlatformBotError, tg, TelegramError } from "./platform";
 import { BOT_COMMANDS, handleUpdate, type TgUpdate } from "./service";
@@ -11,6 +14,8 @@ import { registerAdminCommands, tryHandleSuperadmin } from "./superadmin";
  */
 type Loop = { token: string; stop: () => void };
 type PollerState = { loop: Loop | null; syncing: boolean; startedAt: number };
+
+const OFFSET_KEY = "pc_tg_last_update_id";
 
 const g = globalThis as typeof globalThis & { __pcPoller?: PollerState; __pcPollerSync?: () => void };
 
@@ -83,9 +88,38 @@ function startLoop(token: string): Loop {
   let stopped = false;
   let offset = 0;
   let failures = 0;
+  let offsetLoaded = false;
+
+  // §6.7 — offset persistence: restarts never reprocess old updates.
+  const loadOffset = async () => {
+    if (offsetLoaded) return;
+    offsetLoaded = true;
+    try {
+      const [row] = await db
+        .select()
+        .from(platformSettings)
+        .where(eq(platformSettings.key, OFFSET_KEY))
+        .limit(1);
+      offset = Number((row?.value as { id?: number } | undefined)?.id ?? 0) || 0;
+    } catch {
+      /* fresh install */
+    }
+  };
+  const saveOffset = async (id: number) => {
+    try {
+      await db
+        .insert(platformSettings)
+        .values({ key: OFFSET_KEY, value: { id } })
+        .onConflictDoUpdate({ target: platformSettings.key, set: { value: { id }, updatedAt: new Date() } });
+    } catch {
+      /* best effort */
+    }
+  };
+
   void (async () => {
     while (!stopped) {
       try {
+        await loadOffset();
         const updates = await tg<TgUpdate[]>(
           token,
           "getUpdates",
@@ -101,6 +135,7 @@ function startLoop(token: string): Loop {
             console.error("[panda-chat] telegram update failed", error);
           }
         }
+        if (updates.length > 0) await saveOffset(offset - 1);
       } catch (error) {
         if (stopped) break;
         failures += 1;
