@@ -1,6 +1,18 @@
-# Panda Chat Pro — Implementation Report (v1.5.0)
+# Panda Chat Pro — Implementation Report (v1.5.1)
 
 **Date:** 2026-11-10 · **Branch:** `main` · **Deployed to:** https://chat.kanar.ir (Railway project "fearless-wisdom", service "panda-chat")
+
+---
+
+## 0. v1.5.1 — Mobile responsive fix (COMPLETED)
+
+**User report:** the site displayed badly at phone sizes; the desktop sidebar chat list (search + conversations + FAB) must become FULL-SCREEN on mobile exactly like Telegram; no horizontal scroll anywhere; vision-test every section on mobile AND desktop; keep a hidden entry to the vault on the About page.
+
+- **Root cause 1:** `DashboardShell` kept the chat list and the content pane side-by-side on phones — on `/dashboard/settings`, `/dashboard/about` and even `/dashboard` the two panes squeezed into 390px. Worse, the desktop "select a conversation" placeholder overflows its zero-width flex column by 72px, forcing a horizontal side-scroll of the whole app.
+- **Root cause 2 (self-inflicted, caught & fixed same session):** an `overflow-hidden` added on the content pane during the fix killed document scrolling for the long Settings/About pages (footer became unreachable).
+- **Fix:** `DashboardShell` is now Telegram-style single-pane on phones — `/dashboard` shows ONLY the chat list full-screen; any conversation/settings/about route shows ONLY that pane; desktop (≥768px) keeps the classic two-pane layout. The platform announcement banner was moved above both panes so it stays visible on phones. Chat-list timestamps got `whitespace-nowrap` + 11px for clean single-line Persian text.
+- **Vision-tested (Playwright + VLM, 390×844 & 1440×900):** chat list full-screen ✓, hamburger menu ✓, room chat + emoji picker ✓, manage tabs ✓, settings top/bottom ✓, About top/footer ✓, login ✓, vault PIN dialog ✓, hidden-link → `#version` → 5-tap vault flow ✓ (dialog + PIN prompt), desktop dashboard/room/settings/about ✓. `document.scrollWidth === innerWidth` on every mobile page (zero horizontal scroll). Composer safe-area inset and emoji-picker internal scroll verified present in code/DOM (VLM's "clipped composer/send button" claims disproved by DOM measurement: form x=12 w=366, send x=19–59, all inside the viewport).
+- **Gates:** typecheck ✓ · ESLint ✓ · 93/93 unit tests ✓ · production build ✓.
 
 ---
 

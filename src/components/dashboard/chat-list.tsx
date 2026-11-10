@@ -338,7 +338,7 @@ export function ChatListPanel({ chats: initialChats, user, roomLimit, totalRooms
                         >
                           {chat.name}
                         </h3>
-                        <LocalTime iso={chat.lastActivityAt} mode="relative" className="shrink-0 text-[10px] text-faint" />
+                        <LocalTime iso={chat.lastActivityAt} mode="relative" className="shrink-0 whitespace-nowrap text-[11px] text-faint" />
                       </div>
                       <div className="mt-0.5 flex items-center gap-1.5">
                         <p className="truncate text-xs text-muted" dir="auto">
