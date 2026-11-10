@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ComponentType, type ReactNode } from "react";
+import { useEffect, useState, type ComponentType, type ReactNode } from "react";
 import { Clock, Dog, Heart, Lightbulb, Pizza, Smile, Trophy } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -102,6 +102,16 @@ export function EmojiPicker({ onPick }: Props) {
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState("faces");
   const [recents, setRecents] = useState<string[]>([]);
+
+  /* Esc closes the picker while it is open (outside-click shield handles the rest). */
+  useEffect(() => {
+    if (!open) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [open]);
 
   const toggle = () => {
     if (open) {

@@ -29,6 +29,16 @@ export function GifPicker({ onPick, disabled }: Props) {
   const [configError, setConfigError] = useState<"unconfigured" | "invalid-key" | null>(null);
   const timerRef = useRef<number | undefined>(undefined);
 
+  /* Esc closes the picker while it is open (outside-click shield handles the rest). */
+  useEffect(() => {
+    if (!open) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [open]);
+
   /* Stop any pending debounce when the picker unmounts. */
   useEffect(() => () => window.clearTimeout(timerRef.current), []);
 
