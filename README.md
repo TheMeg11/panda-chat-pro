@@ -44,6 +44,18 @@ npm run build
 npm start
 ```
 
+### Schema self-heal (v1.5.2)
+
+On every server boot (Next.js `instrumentation.ts`), the app probes the
+baseline schema (`select 1 from platform_settings limit 1`). If the table is
+missing — e.g. the service was redeployed **without** its `preDeployCommand`
+(`node scripts/db-init.mjs`), or the database was re-created — the app applies
+`sql/init.sql` plus the incremental migrations from `scripts/db-migrate.mjs`
+by itself, verifies the baseline tables, and only then starts the Telegram
+poller and maintenance loops. A healthy database costs one trivial query per
+boot. `/api/health` still reports 503 `schema-missing` if healing fails (e.g.
+the DB is unreachable), so monitors catch it.
+
 ## Environment variables
 
 See `.env.example` for the full annotated list. Highlights:

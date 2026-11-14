@@ -15,14 +15,18 @@ import pg from "pg";
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, "..");
 
+// Run as a CLI script only when invoked directly (npm run migrate / prestart);
+// the boot-time schema self-heal imports this module for MIGRATIONS, which
+// must not connect to the database or call process.exit.
+const IS_CLI = import.meta.url === `file://${process.argv[1]}`;
+
 const DATABASE_URL = process.env.DATABASE_URL;
-if (!DATABASE_URL) {
+if (IS_CLI && !DATABASE_URL) {
   console.error("[db-migrate] DATABASE_URL is not set — nothing to do.");
   process.exit(0);
 }
 
-const MIGRATIONS = [
-  // ---- v1.4.0 (security audit + new features) ----
+export const MIGRATIONS = [
   `alter table rooms add column if not exists e2ee_enabled boolean not null default false`,
   `alter table rooms add column if not exists default_ttl integer`,
   `alter table messages add column if not exists expires_at timestamptz`,
@@ -97,21 +101,26 @@ const MIGRATIONS = [
    )`,
 ];
 
+export async function applyMigrations(query) {
+  let applied = 0;
+  for (const statement of MIGRATIONS) {
+    try {
+      await query(statement);
+      applied += 1;
+    } catch (error) {
+      // Idempotent statements should never fail; if one does (e.g. a column
+      // already exists with a different type), log and continue.
+      console.warn(`[db-migrate] skipped: ${String(error.message).slice(0, 140)}`);
+    }
+  }
+  return applied;
+}
+
 async function main() {
   const client = new pg.Client({ connectionString: DATABASE_URL, ssl: /sslmode=require/.test(DATABASE_URL) ? { rejectUnauthorized: false } : undefined });
   await client.connect();
   try {
-    let applied = 0;
-    for (const statement of MIGRATIONS) {
-      try {
-        await client.query(statement);
-        applied += 1;
-      } catch (error) {
-        // Idempotent statements should never fail; if one does (e.g. a column
-        // already exists with a different type), log and continue.
-        console.warn(`[db-migrate] skipped: ${String(error.message).slice(0, 140)}`);
-      }
-    }
+    const applied = await applyMigrations((statement) => client.query(statement));
     console.log(`[db-migrate] done — ${applied}/${MIGRATIONS.length} statements applied`);
     if (process.env.MIGRATE_INIT_TOO === "1") {
       const initSql = await readFile(join(root, "sql", "init.sql"), "utf8");
@@ -123,7 +132,12 @@ async function main() {
   }
 }
 
-main().catch((error) => {
-  console.error("[db-migrate] failed:", error.message);
-  process.exit(1);
-});
+// Only run as a CLI script when invoked directly (npm run migrate / prestart);
+// the schema self-heal imports this module for its MIGRATIONS list, which must
+// not trigger a database connection or process.exit.
+if (import.meta.url === `file://${process.argv[1]}`) {
+  main().catch((error) => {
+    console.error("[db-migrate] failed:", error.message);
+    process.exit(1);
+  });
+}
