@@ -27,6 +27,7 @@ import {
   X,
 } from "lucide-react";
 import { Avatar } from "@/components/brand";
+import { HoldToHide } from "@/components/privacy";
 import { useI18n } from "@/components/i18n-provider";
 import { useHydrated } from "@/components/ui";
 import { EmojiPicker } from "@/components/chat/emoji-picker";
@@ -53,6 +54,12 @@ type Props = {
   headerStart?: ReactNode;
   headerActions?: ReactNode;
   className?: string;
+  /**
+   * v1.5.3: when set, holding the chat/room title block for 5 seconds hides
+   * the conversation behind the device PIN (the only hide entrance inside the
+   * conversation itself) and returns to the chat list.
+   */
+  headerHold?: boolean;
 };
 
 type Item =
@@ -79,7 +86,7 @@ function linkify(text: string): ReactNode[] {
   );
 }
 
-export function ChatView({ endpoint, initial, maxLength, headerStart, headerActions, className }: Props) {
+export function ChatView({ endpoint, initial, maxLength, headerStart, headerActions, className, headerHold }: Props) {
   const { t, lang } = useI18n();
   const router = useRouter();
   const hydrated = useHydrated();
@@ -560,26 +567,45 @@ export function ChatView({ endpoint, initial, maxLength, headerStart, headerActi
       {/* Room header */}
       <header className="z-10 flex shrink-0 items-center gap-3 border-b border-line bg-surface/90 px-3 py-2.5 backdrop-blur sm:px-5 sm:py-3">
         {headerStart}
-        <Avatar name={room.name} size={40} square={!room.direct} />
-        <div className="min-w-0 flex-1">
-          <h1 className="truncate text-[0.98rem] font-extrabold text-ink" dir="auto">
-            {room.name}
-          </h1>
-          {room.subtitle ? (
-            <p className="truncate text-xs text-muted" dir="ltr">
-              {room.subtitle}
-            </p>
+        {(() => {
+          const titleBlock = (
+            <>
+              <Avatar name={room.name} size={40} square={!room.direct} />
+              <div className="min-w-0 flex-1">
+                <h1 className="truncate text-[0.98rem] font-extrabold text-ink" dir="auto">
+                  {room.name}
+                </h1>
+                {room.subtitle ? (
+                  <p className="truncate text-xs text-muted" dir="ltr">
+                    {room.subtitle}
+                  </p>
+                ) : (
+                  <p className="flex items-center gap-1.5 text-xs text-muted">
+                    <span>{fmt(room.memberCount === 1 ? t.chat.membersCountOne : t.chat.membersCount, { n: formatNumber(room.memberCount, lang) })}</span>
+                    <span aria-hidden="true">·</span>
+                    <span className="inline-flex items-center gap-1">
+                      <span className="size-1.5 rounded-full bg-[#4cc79a]" aria-hidden="true" />
+                      {fmt(t.chat.onlineCount, { n: formatNumber(room.onlineCount, lang) })}
+                    </span>
+                  </p>
+                )}
+              </div>
+            </>
+          );
+          // v1.5.3: hold the title for 5s to hide the conversation behind the
+          // device PIN — the ONLY hide entrance inside the chat itself.
+          return headerHold ? (
+            <HoldToHide
+              roomId={initial.room.id}
+              className="flex min-w-0 flex-1 items-center gap-3"
+              onHidden={() => router.push("/dashboard")}
+            >
+              {titleBlock}
+            </HoldToHide>
           ) : (
-            <p className="flex items-center gap-1.5 text-xs text-muted">
-              <span>{fmt(room.memberCount === 1 ? t.chat.membersCountOne : t.chat.membersCount, { n: formatNumber(room.memberCount, lang) })}</span>
-              <span aria-hidden="true">·</span>
-              <span className="inline-flex items-center gap-1">
-                <span className="size-1.5 rounded-full bg-[#4cc79a]" aria-hidden="true" />
-                {fmt(t.chat.onlineCount, { n: formatNumber(room.onlineCount, lang) })}
-              </span>
-            </p>
-          )}
-        </div>
+            titleBlock
+          );
+        })()}
         <div className="flex shrink-0 items-center gap-1.5">
           {room.e2eeEnabled ? (
             <span className="badge badge-accent hidden sm:inline-flex" title={t.e2ee.subtitle}>

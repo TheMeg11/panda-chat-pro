@@ -106,6 +106,7 @@ export function RoomWorkspace(props: Props) {
               endpoint={`/api/rooms/${room.id}/messages`}
               initial={snapshot}
               maxLength={maxLength}
+              headerHold
               headerStart={
                 <Link href="/dashboard" className="btn btn-ghost btn-icon btn-sm -ms-1 hidden lg:inline-flex" aria-label={t.room.allRooms} title={t.room.allRooms}>
                   <ChevronLeft className="size-4 rtl:rotate-180" />

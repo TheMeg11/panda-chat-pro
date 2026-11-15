@@ -5,7 +5,7 @@
  * Only immutable build assets and app icons are cached (cache-first) to make
  * the installed app start instantly and work briefly offline.
  */
-const CACHE = "pc-static-v3";
+const CACHE = "pc-static-v4";
 const PRECACHE = ["/manifest.webmanifest", "/icons/icon-32.png", "/icons/icon-192.png", "/icons/icon-512.png"];
 
 self.addEventListener("install", (event) => {

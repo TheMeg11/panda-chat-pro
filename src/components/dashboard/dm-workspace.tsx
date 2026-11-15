@@ -67,6 +67,7 @@ export function DmWorkspace({ roomId, peer, snapshot, maxLength, e2ee }: Props) 
         endpoint={`/api/rooms/${roomId}/messages`}
         initial={dmSnapshot}
         maxLength={maxLength}
+        headerHold
         headerStart={
           <Link href="/dashboard" className="btn btn-ghost btn-icon btn-sm -ms-1" aria-label={t.dm.backToChats} title={t.dm.backToChats}>
             <ChevronLeft className="size-4 rtl:rotate-180" />

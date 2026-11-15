@@ -3,7 +3,7 @@ import { and, asc, desc, eq, inArray, isNotNull, isNull, ne, or, sql } from "dri
 import { db } from "@/db";
 import { messages, roomMembers, rooms, users, type Room, type RoomMember } from "@/db/schema";
 import { hashPassword, randomToken, sha256 } from "./crypto";
-import { requestMeta } from "./request";
+import { getBaseUrl, requestMeta } from "./request";
 import { isUuid } from "./utils";
 
 export const DEVICE_COOKIE = "pc_device";
@@ -332,6 +332,12 @@ export type DashboardChat = {
   hasUnread: boolean;
   lastMessage: { author: string; body: string; fileName: string | null } | null;
   lastActivityAt: string;
+  /**
+   * v1.5.3: full invite link for rooms the viewer OWNS (null for DMs and
+   * rooms owned by someone else) — lets the chat-card options menu offer
+   * "copy invite link" without an extra fetch.
+   */
+  inviteUrl: string | null;
 };
 
 /**
@@ -425,6 +431,7 @@ export async function listDashboardChats(user: { id: string; displayName: string
   }
 
   const counters = await roomCounters(roomIds.filter((id) => rows.find((r) => r.room.id === id)?.room.type !== "dm"));
+  const baseUrl = await getBaseUrl();
 
   return rows.map(({ room }) => {
     const peer = room.type === "dm" ? peers.get(room.id) ?? null : null;
@@ -444,6 +451,10 @@ export async function listDashboardChats(user: { id: string; displayName: string
       hasUnread: unreadMap.get(room.id) ?? false,
       lastMessage: lastMap.get(room.id) ?? null,
       lastActivityAt: room.lastActivityAt.toISOString(),
+      // v1.5.3: invite link ships ONLY for rooms the viewer owns — DMs and
+      // foreign rooms must never leak their (unguessable but real) token.
+      inviteUrl:
+        room.type !== "dm" && room.ownerId === user.id ? `${baseUrl}/r/${room.inviteToken}` : null,
     } satisfies DashboardChat;
   });
 }

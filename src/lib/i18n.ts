@@ -809,6 +809,16 @@ const en = {
   privacy: {
     hide: "Hide chat",
     hideConfirm: "This chat will disappear from your list on this device. You can bring it back from Settings → tap the app version 5 times.",
+    // v1.5.3 — hide via 5s long-press on the chat card (or the chat/room header)
+    holdToHide: "Hold for 5 seconds to hide this chat",
+    holding: "Keep holding to hide…",
+    // v1.5.3 — three-dot chat options menu (everything EXCEPT hide lives here)
+    chatOptions: "Chat options",
+    openChat: "Open chat",
+    copyInvite: "Copy invite link",
+    deleteChat: "Delete chat",
+    deleteChatTitle: "Delete this chat?",
+    deleteChatText: "The chat and its messages will be permanently deleted for everyone. This cannot be undone.",
     pinTitle: "Choose a secret PIN",
     pinText: "Hidden chats on this device will be locked behind this PIN.",
     pin: "PIN",
@@ -858,7 +868,7 @@ const en = {
       online: "Who's online",
       onlineText: "A dot shows who is online right now — presence refreshes automatically while you have the chat open.",
       vault: "Hidden chats (vault)",
-      vaultText: "Any conversation can be hidden behind a device PIN — it disappears from every list. Find it again in Settings by tapping the app version five times.",
+      vaultText: "To hide a chat, press and hold it for 5 seconds — on the chat card or on the chat/room page header — and it vanishes from every list behind your device PIN. The ⋯ button on each chat card holds everything else: open, invite link, delete. Bring hidden chats back from Settings by tapping the app version five times.",
       security: "Security & privacy",
       securityText: "In Account settings you can enable two-factor authentication, manage your sessions and devices, control the Telegram bot and delete your account.",
     },
@@ -1738,6 +1748,16 @@ const fa: Dict = {
   privacy: {
     hide: "مخفی کردن چت",
     hideConfirm: "این چت از فهرست شما روی همین دستگاه حذف می‌شود. برگرداندنش: تنظیمات ← پنج بار روی نسخه برنامه ضربه بزنید.",
+    // v1.5.3 — مخفی‌کردن با نگه‌داشتن ۵ ثانیه روی کارت چت (یا بالای صفحه چت/اتاق)
+    holdToHide: "برای مخفی کردن این چت، ۵ ثانیه نگهش دارید",
+    holding: "همچنان نگه دارید تا مخفی شود…",
+    // v1.5.3 — منوی سه‌نقطه گزینه‌های چت (همه‌ی گزینه‌ها به‌جز مخفی‌کردن)
+    chatOptions: "گزینه‌های چت",
+    openChat: "باز کردن چت",
+    copyInvite: "کپی لینک دعوت",
+    deleteChat: "حذف چت",
+    deleteChatTitle: "این چت حذف شود؟",
+    deleteChatText: "این چت و همه‌ی پیام‌هایش برای همه برای همیشه حذف می‌شود و برگشت‌پذیر نیست.",
     pinTitle: "یک رمز مخفی انتخاب کنید",
     pinText: "چت‌های مخفی روی این دستگاه با این رمز باز می‌شوند.",
     pin: "رمز",
@@ -1787,7 +1807,7 @@ const fa: Dict = {
       online: "چه کسی آنلاین است",
       onlineText: "نقطه‌ی سبز نشان می‌دهد چه کسی همین حالا آنلاین است — وضعیت حضور تا وقتی چت باز است خودکار به‌روز می‌شود.",
       vault: "چت‌های مخفی (Vault)",
-      vaultText: "هر گفتگویی را می‌توانید پشت رمز دستگاه مخفی کنید — از همه فهرست‌ها غایب می‌شود. برای برگرداندن: تنظیمات ← پنج بار روی نسخه برنامه ضربه بزنید.",
+      vaultText: "برای مخفی کردن یک چت، ۵ ثانیه انگشتتان را روی آن نگه دارید — روی کارتِ چت در فهرست، یا روی بالای صفحه‌ی چت/اتاق — تا پشت رمز دستگاه از همه‌ی فهرست‌ها محو شود. دکمه‌ی ⋯ روی هر کارت هم همه‌ی گزینه‌های دیگر را دارد: باز کردن، لینک دعوت، حذف. برگرداندن چت‌های مخفی: تنظیمات ← پنج بار روی نسخه‌ی برنامه ضربه بزنید.",
       security: "امنیت و حریم خصوصی",
       securityText: "در تنظیمات حساب می‌توانید ورود دو مرحله‌ای را فعال کنید، نشست‌ها و دستگاه‌ها را مدیریت کنید، ربات تلگرام را کنترل کرده و حساب خود را حذف کنید.",
     },
