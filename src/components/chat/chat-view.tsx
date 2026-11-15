@@ -598,7 +598,11 @@ export function ChatView({ endpoint, initial, maxLength, headerStart, headerActi
             <HoldToHide
               roomId={initial.room.id}
               className="flex min-w-0 flex-1 items-center gap-3"
-              onHidden={() => router.push("/dashboard")}
+              // hard navigation: a soft router.push racing the modal teardown
+              // navigated late or not at all (verified on the live site); the
+              // hide gesture always leaves the conversation, so a full reload
+              // to the list is both correct and instant.
+              onHidden={() => window.location.assign("/dashboard")}
             >
               {titleBlock}
             </HoldToHide>
