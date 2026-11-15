@@ -38,18 +38,45 @@ export function useLocalFlag(key: string): boolean {
   );
 }
 
+/**
+ * v1.5.3 FIX (React #185 "Maximum update depth exceeded"): getSnapshot MUST
+ * return a STABLE identity between renders. The old version ran JSON.parse
+ * on EVERY call, producing a fresh object each time — useSyncExternalStore
+ * compares snapshots with Object.is, so any component bound to a NON-EMPTY
+ * key re-rendered forever (the settings page crashed for every user who had
+ * set up the hidden-chats vault; the page looked "broken" on open). The
+ * parsed value is now cached per key and re-parsed only when the raw string
+ * actually changes.
+ */
+const jsonCache = new Map<string, { raw: string | null; parsed: unknown }>();
+
+/** exported for the identity-stability regression test */
+export function stableJsonSnapshot(key: string): unknown {
+  let raw: string | null = null;
+  try {
+    raw = localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+  const cached = jsonCache.get(key);
+  if (cached && cached.raw === raw) return cached.parsed;
+  let parsed: unknown = null;
+  if (raw) {
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      parsed = null;
+    }
+  }
+  jsonCache.set(key, { raw, parsed });
+  return parsed;
+}
+
 /** Live JSON value; null when absent or during SSR. */
 export function useLocalJson<T>(key: string): T | null {
   return useSyncExternalStore(
     subscribe,
-    () => {
-      try {
-        const raw = localStorage.getItem(key);
-        return raw ? (JSON.parse(raw) as T) : null;
-      } catch {
-        return null;
-      }
-    },
+    () => stableJsonSnapshot(key) as T | null,
     () => null,
   );
 }
