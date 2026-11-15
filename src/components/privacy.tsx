@@ -78,7 +78,12 @@ export function HideRoomModal({
     const el = document.querySelector(`[data-room-id="${roomId}"]`);
     if (el instanceof HTMLElement) el.style.display = "none";
     onClose();
-    onHidden?.();
+    if (onHidden) {
+      // caller owns the post-hide navigation (e.g. bounce from the room page
+      // to the list) — a router.refresh() in the same tick aborts that push
+      onHidden();
+      return;
+    }
     router.refresh();
   }, [roomId, onClose, onHidden, router]);
 
