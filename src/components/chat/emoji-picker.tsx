@@ -118,6 +118,7 @@ export function EmojiPicker({ onPick, open: openProp, onOpenChange, className }:
   /* Esc closes the picker while it is open (outside-click shield handles the rest). */
   useEffect(() => {
     if (!open) return;
+    setRecents(loadRecents()); // refresh on every open (both trigger paths)
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") setOpen(false);
     };
@@ -125,14 +126,7 @@ export function EmojiPicker({ onPick, open: openProp, onOpenChange, className }:
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [open]);
 
-  const toggle = () => {
-    if (open) {
-      setOpen(false);
-      return;
-    }
-    setRecents(loadRecents());
-    setOpen(true);
-  };
+  const toggle = () => setOpen(!open);
 
   const pick = (emoji: string) => {
     onPick(emoji);
@@ -148,7 +142,8 @@ export function EmojiPicker({ onPick, open: openProp, onOpenChange, className }:
 
   return (
     <div className={cn("relative shrink-0", className)}>
-      {/* In controlled mode (mobile sheet) the trigger lives in the parent. */}
+      {/* Uncontrolled mode renders the trigger here; controlled mode gets its
+          trigger from the parent (desktop bar / mobile "+" sheet). */}
       {openProp === undefined ? (
         <button
           type="button"

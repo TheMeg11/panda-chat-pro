@@ -1130,12 +1130,18 @@ export function ChatView({
                   </>
                 ) : null}
               </div>
-              <EmojiPicker
-                onPick={insertEmoji}
-                open={emojiOpen}
-                onOpenChange={setEmojiOpen}
-                className="hidden md:block"
-              />
+              {/* Emoji — desktop trigger (mobile uses the "+" sheet). The
+                  single controlled picker instance renders further down. */}
+              <button
+                type="button"
+                onClick={() => setEmojiOpen((v) => !v)}
+                disabled={composerLocked || sending}
+                className="btn btn-ghost btn-icon size-10 shrink-0 rounded-xl hidden md:inline-flex"
+                aria-label="Emoji"
+                title="Emoji"
+              >
+                <Smile className="size-[18px]" />
+              </button>
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
@@ -1148,13 +1154,23 @@ export function ChatView({
               </button>
               {/* GIFs: authenticated members of non-E2EE rooms only (API-side rule mirrored here). */}
               {me.role !== "guest" && !room.e2eeEnabled ? (
-                <GifPicker
-                  onPick={(gifId) => void sendGif(gifId)}
+                <button
+                  type="button"
+                  onClick={() => setGifOpen((v) => !v)}
                   disabled={sending}
-                  open={gifOpen}
-                  onOpenChange={setGifOpen}
-                  className="hidden md:block"
-                />
+                  className="btn btn-ghost btn-icon size-10 shrink-0 rounded-xl hidden md:inline-flex"
+                  aria-label="GIF"
+                  title="GIF"
+                >
+                  <ImagePlay className="size-[18px]" />
+                </button>
+              ) : null}
+              {/* The single controlled pickers — opened by the desktop
+                  triggers above or the mobile "+" sheet below. No trigger of
+                  their own; they float above the composer. */}
+              <EmojiPicker onPick={insertEmoji} open={emojiOpen} onOpenChange={setEmojiOpen} />
+              {me.role !== "guest" && !room.e2eeEnabled ? (
+                <GifPicker onPick={(gifId) => void sendGif(gifId)} disabled={sending} open={gifOpen} onOpenChange={setGifOpen} />
               ) : null}
               <select
                 value={ttlChoice}
