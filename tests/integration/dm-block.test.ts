@@ -3,7 +3,7 @@ import { and, eq } from "drizzle-orm";
 import { db } from "../../src/db";
 import { messages, roomMembers, rooms, userBlocks, users } from "../../src/db/schema";
 import { findOrCreateDm } from "../../src/lib/rooms";
-import { postMessage } from "../../src/lib/chat";
+import { BlockedDmError, postMessage } from "../../src/lib/chat";
 import { randomToken } from "../../src/lib/crypto";
 
 /**
@@ -67,6 +67,24 @@ describe.skipIf(!hasDb)("dm blocking (v1.7.0)", () => {
         await tx.insert(userBlocks).values({ blockerId: alice, blockedId: bob }).onConflictDoNothing();
       }),
     ).resolves.toBeUndefined();
+  });
+
+  it("a block row freezes posting in BOTH directions until the row is gone", async () => {
+    const members = await db.select().from(roomMembers).where(eq(roomMembers.roomId, dmRoom));
+    const room = (await db.select().from(rooms).where(eq(rooms.id, dmRoom)).limit(1))[0];
+    const post = (memberId: string, name: string) =>
+      postMessage(room, { memberId, nickname: name, role: "owner", authorName: name }, "hello again", null, "web");
+    // the row inserted by the previous test freezes the conversation both ways
+    await db.insert(userBlocks).values({ blockerId: alice, blockedId: bob }).onConflictDoNothing();
+    await expect(post(members.find((m) => m.userId === alice)!.id, "Alice")).rejects.toBeInstanceOf(BlockedDmError);
+    await expect(post(members.find((m) => m.userId === bob)!.id, "Bob")).rejects.toBeInstanceOf(BlockedDmError);
+    // the reverse pair freezes too — either side alone can stop the exchange
+    await db.insert(userBlocks).values({ blockerId: bob, blockedId: alice }).onConflictDoNothing();
+    await expect(post(members.find((m) => m.userId === alice)!.id, "Alice")).rejects.toBeInstanceOf(BlockedDmError);
+    // clearing every row restores sending for both participants
+    await db.delete(userBlocks);
+    await expect(post(members.find((m) => m.userId === alice)!.id, "Alice")).resolves.toHaveProperty("id");
+    await expect(post(members.find((m) => m.userId === bob)!.id, "Bob")).resolves.toHaveProperty("id");
   });
 
   it("unblock removes the row and restores a clean slate", async () => {

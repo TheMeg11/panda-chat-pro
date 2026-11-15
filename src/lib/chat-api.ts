@@ -3,7 +3,7 @@ import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { roomMembers } from "@/db/schema";
 import type { Room } from "@/db/schema";
-import { buildSnapshot, normalizeBody, postMessage, softDeleteMessage, touchMember, type ChatRoomOverride, type Viewer } from "./chat";
+import { buildSnapshot, dmBlocked, normalizeBody, postMessage, softDeleteMessage, touchMember, type ChatRoomOverride, type Viewer } from "./chat";
 import { storeFile } from "./files";
 import { maxFileBytes } from "./file-mime";
 import { rateLimit } from "./rate-limit";
@@ -93,6 +93,10 @@ export async function chatPost(req: Request, room: Room, viewer: ChatViewer, roo
   // Self-destruct: per-send override, else the conversation default.
   const ttlRaw = Number(payload?.ttl);
   const ttl = Number.isSafeInteger(ttlRaw) && ttlRaw > 0 ? Math.min(ttlRaw, 7 * 86_400) : room.defaultTtl ?? null;
+
+  // v1.7.0 — blocked DMs freeze new sends in BOTH directions (a clean 403 for
+  // the composer; postMessage still guards as the final choke point).
+  if (await dmBlocked(room, viewer.memberId)) return json({ error: "dmBlocked" }, 403);
 
   const msg = await postMessage(room, viewer, body, Number(payload?.replyToId) || null, "web", fileId, {
     ttlSeconds: ttl,

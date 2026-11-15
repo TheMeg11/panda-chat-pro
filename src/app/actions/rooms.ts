@@ -2,9 +2,9 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { and, eq, ne, sql } from "drizzle-orm";
+import { and, eq, isNotNull, ne, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { rooms, telegramLinks } from "@/db/schema";
+import { rooms, roomMembers, telegramLinks, userBlocks } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
 import { hashPassword } from "@/lib/crypto";
 import {
@@ -156,4 +156,55 @@ export async function deleteChatAction(_prev: ActionState, formData: FormData): 
   await db.delete(rooms).where(eq(rooms.id, room.id));
   revalidatePath("/dashboard");
   redirect("/dashboard");
+}
+
+/**
+ * v1.7.0 — block/unblock the other participant of a 1:1 chat (`op` = block |
+ * unblock). Blocking is one-sided state stored as a blocker → blocked pair;
+ * the send path freezes the conversation in BOTH directions while a row
+ * exists, so either side alone can stop the exchange.
+ */
+export async function blockPeerAction(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  const user = await getCurrentUser();
+  if (!user) return { error: "unauthorized" };
+  const settings = await getSettings();
+  if (settings.maintenanceMode) return { error: "maintenance" };
+
+  const op = String(formData.get("op") ?? "");
+  if (op !== "block" && op !== "unblock") return { error: "invalidInput" };
+  const room = await getAccessibleRoom(user.id, String(formData.get("roomId") ?? ""));
+  if (!room || room.type !== "dm") return { error: "notFound" };
+
+  const members = await db
+    .select({ userId: roomMembers.userId })
+    .from(roomMembers)
+    .where(and(eq(roomMembers.roomId, room.id), eq(roomMembers.role, "owner"), isNotNull(roomMembers.userId)));
+  const peerId = members.map((m) => m.userId).find((id) => id && id !== user.id);
+  if (!peerId) return { error: "notFound" };
+
+  if (op === "block") {
+    await db.insert(userBlocks).values({ blockerId: user.id, blockedId: peerId }).onConflictDoNothing();
+  } else {
+    await db
+      .delete(userBlocks)
+      .where(and(eq(userBlocks.blockerId, user.id), eq(userBlocks.blockedId, peerId)));
+  }
+  revalidatePath(`/dashboard/rooms/${room.id}`);
+  revalidatePath("/dashboard");
+  return { ok: true };
+}
+
+/** v1.7.0 — wipe every message of a conversation without deleting the chat itself. */
+export async function clearChatAction(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  const user = await getCurrentUser();
+  if (!user) return { error: "unauthorized" };
+  const settings = await getSettings();
+  if (settings.maintenanceMode) return { error: "maintenance" };
+
+  const room = await getAccessibleRoom(user.id, String(formData.get("roomId") ?? ""));
+  if (!room) return { error: "notFound" };
+  await clearRoom(room.id);
+  revalidatePath(`/dashboard/rooms/${room.id}`);
+  revalidatePath("/dashboard");
+  return { ok: true };
 }

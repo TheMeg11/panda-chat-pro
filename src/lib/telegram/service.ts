@@ -12,7 +12,7 @@ import {
   type User,
 } from "@/db/schema";
 import { randomToken } from "../crypto";
-import { postMessage, softDeleteMessage } from "../chat";
+import { BlockedDmError, postMessage, softDeleteMessage } from "../chat";
 import {
   clearRoom,
   findOrCreateDm,
@@ -766,13 +766,23 @@ export async function handleUpdate(update: TgUpdate) {
       const dm = await findOrCreateDm(user, peer);
       if (dm.e2eeEnabled) return void (await send(chatId, "🔒 That conversation is end-to-end encrypted — send messages from the web app."));
       const ownerMember = await getOwnerMember(dm, user);
-      const posted = await postMessage(
-        dm,
-        { memberId: ownerMember.id, nickname: user.displayName, role: "owner", authorName: user.displayName },
-        body.slice(0, settings.maxMessageLength),
-        null,
-        "telegram",
-      );
+      let posted;
+      try {
+        posted = await postMessage(
+          dm,
+          { memberId: ownerMember.id, nickname: user.displayName, role: "owner", authorName: user.displayName },
+          body.slice(0, settings.maxMessageLength),
+          null,
+          "telegram",
+        );
+      } catch (error) {
+        // v1.7.0 — a blocked DM freezes sends in both directions, from the web
+        // and from the bot; keep the bot loop alive with a short notice.
+        if (error instanceof BlockedDmError) {
+          return void (await send(chatId, "⛔ This conversation is blocked — unblock it in Panda Chat first."));
+        }
+        throw error;
+      }
       // Deliver to the receiver's Telegram chat with a reply-thread mapping so
       // their answer lands back in the SAME conversation (§6.3).
       try {

@@ -114,7 +114,7 @@ export function ChatHamburgerMenu({ roomId, variant, isOwner, blocked, onAfterAc
             ) : null}
 
             {variant === "dm" || isOwner ? (
-              <ActionForm action={deleteChatAction} showMessage={false}>
+              <ActionForm action={deleteChatAction} showMessage={false} confirm={t.dm.deleteChatConfirm}>
                 <input type="hidden" name="roomId" value={roomId} />
                 <SubmitButton className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-sm font-semibold text-rose-ink transition hover:bg-rose-soft">
                   <Trash2 className="size-4 rtl:-scale-x-100" />
@@ -266,6 +266,7 @@ export function DmProfilePanel({ roomId, open, onClose, peer, avatarSrc, blocked
             <div className="border-t border-line px-4 py-3">
               <button
                 type="button"
+                data-tutorial="vault"
                 onClick={() => {
                   onClose();
                   onOpenPrivacy();

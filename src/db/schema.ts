@@ -140,6 +140,26 @@ export const userOnboarding = pgTable("user_onboarding", {
   updatedAt: ts("updated_at").notNull().defaultNow(),
 });
 
+/**
+ * v1.7.0 — DM blocks: one row per blocker → blocked pair. The send path checks
+ * a block row between the two DM participants in BOTH directions, so either
+ * side blocking freezes the 1:1 conversation for both participants.
+ */
+export const userBlocks = pgTable(
+  "user_blocks",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    blockerId: uuid("blocker_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    blockedId: uuid("blocked_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    createdAt: ts("created_at").notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("user_blocks_pair_idx").on(t.blockerId, t.blockedId)],
+);
+
 /* ------------------------------------------------------------------ */
 /* End-to-end encryption key material (client-generated, server-blind)   */
 /* ------------------------------------------------------------------ */

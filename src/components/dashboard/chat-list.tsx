@@ -23,7 +23,6 @@ import { startDmAction } from "@/app/actions/dm";
 import { Avatar, PandaMark } from "@/components/brand";
 import { useI18n } from "@/components/i18n-provider";
 import { CreateRoomButton } from "@/components/dashboard/create-room";
-import { ChatCardOptions, HoldToHide } from "@/components/privacy";
 import { ActionForm, LangToggle, LocalTime, SubmitButton, ThemeToggle } from "@/components/ui";
 import type { DashboardChat } from "@/lib/rooms";
 import { cn } from "@/lib/utils";
@@ -347,37 +346,37 @@ export function ChatListPanel({ chats: initialChats, user, roomLimit, totalRooms
               const active = pathname === `/dashboard/rooms/${chat.id}`;
               return (
                 <li key={chat.id} className="relative">
-                  <HoldToHide roomId={chat.id} className="group">
-                    <Link
-                      href={`/dashboard/rooms/${chat.id}`}
-                      data-room-id={chat.id}
-                      className={cn(
-                        "group flex items-center gap-3 rounded-xl px-2.5 py-2.5 transition select-none",
-                        active ? "bg-accent-soft" : "hover:bg-surface-2",
-                      )}
-                    >
-                      <ChatCardOptions chat={chat} />
-                      <Avatar name={chat.name} size={46} square={chat.type !== "dm"} />
-                      <div className="min-w-0 flex-1 leading-tight">
-                        <div className="flex items-baseline justify-between gap-2">
-                          <h3
-                            className={cn("truncate text-[0.92rem] font-extrabold", active ? "text-accent-ink" : "text-ink")}
-                            dir="auto"
-                          >
-                            {chat.name}
-                          </h3>
-                          <LocalTime iso={chat.lastActivityAt} mode="relative" className="shrink-0 whitespace-nowrap text-[11px] text-faint" />
-                        </div>
-                        <div className="mt-0.5 flex items-center gap-1.5">
-                          <p className="truncate text-xs text-muted" dir="auto">
-                            {preview(chat)}
-                          </p>
-                          {chat.hasPassword ? <KeyRound className="size-3 shrink-0 text-faint" /> : null}
-                          {chat.isDisabled ? <Ban className="size-3 shrink-0 text-rose-ink" /> : null}
-                        </div>
+                  {/* v1.7.0 — plain Telegram-style cards: the per-card ⋯ menu and
+                      the 5-second hold-to-hide are gone; hiding lives in the
+                      conversation's profile-panel ☰ menu. */}
+                  <Link
+                    href={`/dashboard/rooms/${chat.id}`}
+                    data-room-id={chat.id}
+                    className={cn(
+                      "flex items-center gap-3 rounded-xl px-2.5 py-2.5 transition",
+                      active ? "bg-accent-soft" : "hover:bg-surface-2",
+                    )}
+                  >
+                    <Avatar name={chat.name} size={46} square={chat.type !== "dm"} />
+                    <div className="min-w-0 flex-1 leading-tight">
+                      <div className="flex items-baseline justify-between gap-2">
+                        <h3
+                          className={cn("truncate text-[0.92rem] font-extrabold", active ? "text-accent-ink" : "text-ink")}
+                          dir="auto"
+                        >
+                          {chat.name}
+                        </h3>
+                        <LocalTime iso={chat.lastActivityAt} mode="relative" className="shrink-0 whitespace-nowrap text-[11px] text-faint" />
                       </div>
-                    </Link>
-                  </HoldToHide>
+                      <div className="mt-0.5 flex items-center gap-1.5">
+                        <p className="truncate text-xs text-muted" dir="auto">
+                          {preview(chat)}
+                        </p>
+                        {chat.hasPassword ? <KeyRound className="size-3 shrink-0 text-faint" /> : null}
+                        {chat.isDisabled ? <Ban className="size-3 shrink-0 text-rose-ink" /> : null}
+                      </div>
+                    </div>
+                  </Link>
                 </li>
               );
             })}

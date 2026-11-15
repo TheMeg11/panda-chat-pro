@@ -27,7 +27,6 @@ import {
   X,
 } from "lucide-react";
 import { Avatar } from "@/components/brand";
-import { HoldToHide } from "@/components/privacy";
 import { useI18n } from "@/components/i18n-provider";
 import { useHydrated } from "@/components/ui";
 import { EmojiPicker } from "@/components/chat/emoji-picker";
@@ -55,11 +54,11 @@ type Props = {
   headerActions?: ReactNode;
   className?: string;
   /**
-   * v1.5.3: when set, holding the chat/room title block for 5 seconds hides
-   * the conversation behind the device PIN (the only hide entrance inside the
-   * conversation itself) and returns to the chat list.
+   * v1.7.0 — tap the header title/avatar to open the profile/info panel.
+   * Replaces the v1.5.3 hold-to-hide gesture on the title: the hold is gone,
+   * hiding lives in the panel's ☰ menu instead.
    */
-  headerHold?: boolean;
+  onHeaderOpen?: () => void;
 };
 
 type Item =
@@ -86,7 +85,7 @@ function linkify(text: string): ReactNode[] {
   );
 }
 
-export function ChatView({ endpoint, initial, maxLength, headerStart, headerActions, className, headerHold }: Props) {
+export function ChatView({ endpoint, initial, maxLength, headerStart, headerActions, className, onHeaderOpen }: Props) {
   const { t, lang } = useI18n();
   const router = useRouter();
   const hydrated = useHydrated();
@@ -592,20 +591,18 @@ export function ChatView({ endpoint, initial, maxLength, headerStart, headerActi
               </div>
             </>
           );
-          // v1.5.3: hold the title for 5s to hide the conversation behind the
-          // device PIN — the ONLY hide entrance inside the chat itself.
-          return headerHold ? (
-            <HoldToHide
-              roomId={initial.room.id}
-              className="flex min-w-0 flex-1 items-center gap-3"
-              // hard navigation: a soft router.push racing the modal teardown
-              // navigated late or not at all (verified on the live site); the
-              // hide gesture always leaves the conversation, so a full reload
-              // to the list is both correct and instant.
-              onHidden={() => window.location.assign("/dashboard")}
+          // v1.7.0 — tapping the title/avatar opens the profile/info panel
+          // (Telegram-style). The old 5-second hold-to-hide on the title is
+          // gone; hiding now lives in the panel's ☰ menu.
+          return onHeaderOpen ? (
+            <button
+              type="button"
+              onClick={onHeaderOpen}
+              className="-m-1 flex min-w-0 flex-1 items-center gap-3 rounded-xl p-1 text-start transition hover:bg-surface-2"
+              aria-haspopup="dialog"
             >
               {titleBlock}
-            </HoldToHide>
+            </button>
           ) : (
             titleBlock
           );

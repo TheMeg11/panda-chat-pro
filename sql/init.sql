@@ -287,3 +287,12 @@ CREATE TABLE IF NOT EXISTS user_avatars (
   data bytea NOT NULL,
   updated_at timestamptz NOT NULL DEFAULT now()
 );
+
+-- v1.7.0 — DM blocks: either side blocking freezes the 1:1 conversation.
+CREATE TABLE IF NOT EXISTS user_blocks (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  blocker_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  blocked_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS user_blocks_pair_idx ON user_blocks (blocker_id, blocked_id);

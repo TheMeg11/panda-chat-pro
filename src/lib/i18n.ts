@@ -232,6 +232,17 @@ const en = {
     deleteChatConfirm: "Delete this private chat and all of its messages permanently — for both sides?",
     chatDeleted: "Chat deleted.",
     hideChat: "Hide chat",
+    // v1.7.0 — profile panel + ☰ menu
+    profileTitle: "Chat info",
+    block: "Block",
+    unblock: "Unblock",
+    blockedNote: "You've blocked this contact. Messages are stopped in both directions until you unblock.",
+    clearHistory: "Clear history",
+    clearHistoryConfirm: "Clear ALL messages in this conversation? This can't be undone.",
+    lastSeenOnline: "online",
+    lastSeenAt: "last seen {time}",
+    lastSeenRecently: "last seen recently",
+    lastSeenUnknown: "last seen a long time ago",
   },
 
   room: {
@@ -760,6 +771,7 @@ const en = {
     registrationClosed: "Registration is currently closed.",
     accountSuspended: "This account has been suspended.",
     maintenance: "Panda Chat is under maintenance. Please try again later.",
+    dmBlocked: "This conversation is blocked — messages can't be sent in either direction right now.",
     roomNameInvalid: "Room name must be 1–60 characters.",
     roomLimit: "You've reached your room limit.",
     roomPasswordShort: "Room password must be at least 4 characters.",
@@ -1194,6 +1206,17 @@ const fa: Dict = {
     deleteChatConfirm: "این گفتگوی خصوصی و همهٔ پیام‌هایش برای هر دو طرف برای همیشه حذف شود؟",
     chatDeleted: "گفتگو حذف شد.",
     hideChat: "مخفی‌کردن گفتگو",
+    // v1.7.0 — پنل پروفایل و منوی ☰
+    profileTitle: "اطلاعات گفتگو",
+    block: "مسدودسازی",
+    unblock: "رفع مسدودی",
+    blockedNote: "این مخاطب را مسدود کرده‌اید؛ تا زمان رفع مسدودی، ارسال پیام در دو جهت متوقف است.",
+    clearHistory: "پاک‌کردن تاریخچه",
+    clearHistoryConfirm: "همهٔ پیام‌های این گفتگو پاک شود؟ این کار برگشت‌پذیر نیست.",
+    lastSeenOnline: "آنلاین",
+    lastSeenAt: "آخرین بازدید {time}",
+    lastSeenRecently: "آخرین بازدید به‌تازگی",
+    lastSeenUnknown: "آخرین بازدید مدت‌ها پیش",
   },
 
   room: {
@@ -1719,6 +1742,7 @@ const fa: Dict = {
     registrationClosed: "ثبت‌نام در حال حاضر بسته است.",
     accountSuspended: "این حساب معلق شده است.",
     maintenance: "پاندا چت در حال به‌روزرسانی است. لطفاً بعداً تلاش کنید.",
+    dmBlocked: "این گفتگو مسدود است — در حال حاضر ارسال پیام در دو جهت ممکن نیست.",
     roomNameInvalid: "نام اتاق باید ۱ تا ۶۰ کاراکتر باشد.",
     roomLimit: "به سقف تعداد اتاق‌های خود رسیده‌اید.",
     roomPasswordShort: "رمز اتاق باید حداقل ۴ کاراکتر باشد.",

@@ -1,8 +1,8 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { and, eq, ne, sql } from "drizzle-orm";
+import { and, eq, ne, or, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { e2eeKeys, roomMembers, users } from "@/db/schema";
+import { e2eeKeys, roomMembers, userBlocks, users } from "@/db/schema";
 import { RoomWorkspace } from "@/components/dashboard/room-workspace";
 import { DmWorkspace } from "@/components/dashboard/dm-workspace";
 import { requireUser } from "@/lib/auth";
@@ -44,7 +44,13 @@ export default async function RoomPage({ params }: { params: Promise<{ id: strin
     const [settings, peerRows, participantKeys] = await Promise.all([
       getSettings(),
       db
-        .select({ username: users.username, displayName: users.displayName, userId: roomMembers.userId })
+        .select({
+          username: users.username,
+          displayName: users.displayName,
+          bio: users.bio,
+          userId: roomMembers.userId,
+          lastSeenAt: roomMembers.lastSeenAt,
+        })
         .from(roomMembers)
         .innerJoin(users, eq(users.id, roomMembers.userId))
         .where(
@@ -62,6 +68,21 @@ export default async function RoomPage({ params }: { params: Promise<{ id: strin
           sql`${e2eeKeys.userId} in (select user_id from room_members where room_id = ${room.id} and user_id is not null)`,
         ),
     ]);
+    // v1.7.0 — block state in EITHER direction (both sides see the frozen state)
+    const peerUserId = peerRows[0]?.userId ?? null;
+    const [blockRow] = peerUserId
+      ? await db
+          .select({ blockerId: userBlocks.blockerId })
+          .from(userBlocks)
+          .where(
+            or(
+              and(eq(userBlocks.blockerId, user.id), eq(userBlocks.blockedId, peerUserId)),
+              and(eq(userBlocks.blockerId, peerUserId), eq(userBlocks.blockedId, user.id)),
+            ),
+          )
+          .limit(1)
+      : [undefined];
+    const blocked = Boolean(blockRow);
     // Fallback when the peer account no longer exists: keep the stored name.
     const peerName = peerRows[0]?.displayName ?? room.name;
     const snapshot = await buildSnapshot(room, viewer, 0, null, {
@@ -73,7 +94,15 @@ export default async function RoomPage({ params }: { params: Promise<{ id: strin
     return (
       <DmWorkspace
         roomId={room.id}
-        peer={{ displayName: peerName, username: peerRows[0]?.username ?? "" }}
+        peer={{
+          displayName: peerName,
+          username: peerRows[0]?.username ?? "",
+          bio: peerRows[0]?.bio ?? null,
+          lastSeenAt: peerRows[0]?.lastSeenAt ? peerRows[0].lastSeenAt.toISOString() : null,
+          // profile panel pulls the avatar through the auth-guarded image route
+          avatarSrc: peerRows[0]?.userId ? `/api/users/${peerRows[0].userId}/avatar` : undefined,
+        }}
+        blocked={blocked}
         snapshot={snapshot}
         maxLength={settings.maxMessageLength}
         e2ee={{

@@ -30,6 +30,7 @@ import { roomAction } from "@/app/actions/rooms";
 import { setRoomTtlAction } from "@/app/actions/e2ee";
 import { Avatar } from "@/components/brand";
 import { ChatView } from "@/components/chat/chat-view";
+import { JoinedRoomInfoPanel } from "@/components/chat/chat-menu";
 import { useI18n } from "@/components/i18n-provider";
 import { ActionButton, ActionForm, CopyButton, LocalTime, PasswordInput, SubmitButton, useNow } from "@/components/ui";
 import type { ChatSnapshot } from "@/lib/chat";
@@ -74,6 +75,9 @@ export function RoomWorkspace(props: Props) {
   const { room, snapshot, maxLength, isOwner } = props;
   const { t } = useI18n();
   const [view, setView] = useState<"chat" | "manage">("chat");
+  // v1.7.0 — tapping the room title opens the read-only info panel (joined
+  // members) instead of the old 5-second hold-to-hide gesture.
+  const [infoOpen, setInfoOpen] = useState(false);
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -114,7 +118,7 @@ export function RoomWorkspace(props: Props) {
               endpoint={`/api/rooms/${room.id}/messages`}
               initial={snapshot}
               maxLength={maxLength}
-              headerHold
+              onHeaderOpen={() => setInfoOpen(true)}
               headerStart={
                 <Link href="/dashboard" className="btn btn-ghost btn-icon btn-sm -ms-1 hidden lg:inline-flex" aria-label={t.room.allRooms} title={t.room.allRooms}>
                   <ChevronLeft className="size-4 rtl:rotate-180" />
@@ -123,6 +127,14 @@ export function RoomWorkspace(props: Props) {
             />
           )}
         </section>
+        <JoinedRoomInfoPanel
+          roomId={room.id}
+          open={infoOpen}
+          onClose={() => setInfoOpen(false)}
+          name={room.name}
+          description={room.description}
+          memberCount={snapshot.room.memberCount}
+        />
         {isOwner ? (
           <aside
             className={cn(

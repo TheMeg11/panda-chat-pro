@@ -1,6 +1,54 @@
-import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, ne, or, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { messages, roomMembers, rooms, files, type Message, type Room } from "@/db/schema";
+import { messages, roomMembers, rooms, files, userBlocks, type Message, type Room } from "@/db/schema";
+
+/**
+ * v1.7.0 — thrown by postMessage when a DM is frozen by a block row between
+ * the two participants (either direction). The web API pre-checks and answers
+ * `dmBlocked`; the Telegram paths catch it and reply a short notice.
+ */
+export class BlockedDmError extends Error {
+  constructor() {
+    super("dmBlocked");
+    this.name = "BlockedDmError";
+  }
+}
+
+/**
+ * v1.7.0 — does a block row exist between the two participants of this 1:1
+ * chat, in either direction? DM member rows are account-linked owner rows
+ * whose device hash is `owner:<userId>` (see dmDeviceHash), so the pair is
+ * resolved from those rows. Non-DM rooms (and DMs without account rows) are
+ * never blocked.
+ */
+export async function dmBlocked(room: Room, memberId: string): Promise<boolean> {
+  if (room.type !== "dm") return false;
+  const [self] = await db
+    .select({ deviceHash: roomMembers.deviceHash })
+    .from(roomMembers)
+    .where(eq(roomMembers.id, memberId))
+    .limit(1);
+  if (!self || !self.deviceHash?.startsWith("owner:")) return false;
+  const [peer] = await db
+    .select({ deviceHash: roomMembers.deviceHash })
+    .from(roomMembers)
+    .where(and(eq(roomMembers.roomId, room.id), ne(roomMembers.id, memberId), eq(roomMembers.role, "owner")))
+    .limit(1);
+  if (!peer || !peer.deviceHash?.startsWith("owner:")) return false;
+  const selfId = self.deviceHash.slice("owner:".length);
+  const peerId = peer.deviceHash.slice("owner:".length);
+  const [row] = await db
+    .select({ blockerId: userBlocks.blockerId })
+    .from(userBlocks)
+    .where(
+      or(
+        and(eq(userBlocks.blockerId, selfId), eq(userBlocks.blockedId, peerId)),
+        and(eq(userBlocks.blockerId, peerId), eq(userBlocks.blockedId, selfId)),
+      ),
+    )
+    .limit(1);
+  return Boolean(row);
+}
 
 export type ChatFile = {
   id: string;
@@ -187,6 +235,10 @@ export async function postMessage(
   fileId: string | null = null,
   opts: { ttlSeconds?: number | null; encrypted?: boolean; gifId?: string } = {},
 ): Promise<Message> {
+  // v1.7.0 — a DM blocked in either direction is frozen for BOTH participants;
+  // history stays readable, only new sends stop (see tests/integration/dm-block.test.ts).
+  if (await dmBlocked(room, author.memberId)) throw new BlockedDmError();
+
   // GIF id is validated by the API layer; here it is only length-capped so a
   // stray long value can never overflow the varchar(64) column.
   const gifId = typeof opts.gifId === "string" && opts.gifId ? opts.gifId.slice(0, 64) : null;

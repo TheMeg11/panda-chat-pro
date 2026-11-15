@@ -1,23 +1,31 @@
 "use client";
 
 import { useActionState, useState } from "react";
-import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { ChevronLeft, EyeOff, LockKeyhole, ShieldCheck, Timer, Trash2 } from "lucide-react";
-import { deleteChatAction } from "@/app/actions/rooms";
+import { LockKeyhole, Timer } from "lucide-react";
 import { publishE2eeKeyAction, setRoomE2eeAction, setRoomTtlAction } from "@/app/actions/e2ee";
 import { ChatView } from "@/components/chat/chat-view";
+import { DmProfilePanel } from "@/components/chat/chat-menu";
 import { useI18n } from "@/components/i18n-provider";
 import { ActionForm, Modal, SubmitButton } from "@/components/ui";
 import type { ChatSnapshot } from "@/lib/chat";
 import { errorText } from "@/lib/i18n";
-import { hideRoom } from "@/lib/vault";
 import { generateIdentity } from "@/lib/e2ee-client";
 import type { ActionState } from "@/lib/utils";
 
 type Props = {
   roomId: string;
-  peer: { displayName: string; username: string };
+  /** v1.7.0 — the profile panel carries the Telegram-style identity lines */
+  peer: {
+    displayName: string;
+    username: string;
+    bio?: string | null;
+    /** ISO timestamp of the peer's last activity (their DM member row) */
+    lastSeenAt: string | null;
+    /** server-served avatar URL (empty → initials fallback) */
+    avatarSrc?: string;
+  };
+  /** v1.7.0 — current block state between the two accounts (either direction) */
+  blocked: boolean;
   snapshot: ChatSnapshot;
   maxLength: number;
   /** E2EE key availability for me and the peer (server-checked). */
@@ -26,13 +34,14 @@ type Props = {
 
 /**
  * 1:1 private chat pane — a focused Telegram-like conversation view.
- * Management tabs, invite links, passwords and bots do not exist here;
- * actions are hide (device vault), E2EE & self-destruct settings, delete.
+ * The header has NO hold gesture and NO per-action buttons anymore: tapping
+ * the title/avatar opens the profile panel (DmProfilePanel), whose ☰ menu
+ * carries every chat action (block, clear history, delete, hide) plus the
+ * account links. The privacy sheet (E2EE + self-destruct) stays a modal.
  */
-export function DmWorkspace({ roomId, peer, snapshot, maxLength, e2ee }: Props) {
+export function DmWorkspace({ roomId, peer, blocked, snapshot, maxLength, e2ee }: Props) {
   const { t } = useI18n();
-  const router = useRouter();
-  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [publishState, publishAction, publishPending] = useActionState<ActionState, FormData>(publishE2eeKeyAction, {});
   const [busy, setBusy] = useState(false);
@@ -67,47 +76,19 @@ export function DmWorkspace({ roomId, peer, snapshot, maxLength, e2ee }: Props) 
         endpoint={`/api/rooms/${roomId}/messages`}
         initial={dmSnapshot}
         maxLength={maxLength}
-        headerHold
-        headerStart={
-          <Link href="/dashboard" className="btn btn-ghost btn-icon btn-sm -ms-1" aria-label={t.dm.backToChats} title={t.dm.backToChats}>
-            <ChevronLeft className="size-4 rtl:rotate-180" />
-          </Link>
-        }
-        headerActions={
-          <>
-            <button
-              type="button"
-              className="btn btn-ghost btn-icon btn-sm"
-              title={t.dm.chatSettings}
-              aria-label={t.dm.chatSettings}
-              data-tutorial="vault"
-              onClick={() => setSettingsOpen(true)}
-            >
-              <ShieldCheck className="size-4" />
-            </button>
-            <button
-              type="button"
-              className="btn btn-ghost btn-icon btn-sm"
-              title={t.dm.hideChat}
-              aria-label={t.dm.hideChat}
-              onClick={() => {
-                hideRoom(roomId);
-                router.push("/dashboard");
-              }}
-            >
-              <EyeOff className="size-4" />
-            </button>
-            <button
-              type="button"
-              className="btn btn-ghost btn-icon btn-sm"
-              title={t.dm.deleteChat}
-              aria-label={t.dm.deleteChat}
-              onClick={() => setConfirmDelete(true)}
-            >
-              <Trash2 className="size-4" />
-            </button>
-          </>
-        }
+        onHeaderOpen={() => setProfileOpen(true)}
+      />
+
+      {/* Telegram-style profile panel — identity, last seen, ☰ chat actions */}
+      <DmProfilePanel
+        roomId={roomId}
+        open={profileOpen}
+        onClose={() => setProfileOpen(false)}
+        peer={{ displayName: peer.displayName, username: peer.username || null, bio: peer.bio ?? null, lastSeenAt: peer.lastSeenAt }}
+        avatarSrc={peer.avatarSrc}
+        blocked={blocked}
+        onOpenPrivacy={() => setSettingsOpen(true)}
+        e2eeEnabled={e2ee.enabled}
       />
 
       {/* Conversation privacy settings: E2EE + self-destruct */}
@@ -198,19 +179,6 @@ export function DmWorkspace({ roomId, peer, snapshot, maxLength, e2ee }: Props) 
             </ActionForm>
           </section>
         </div>
-      </Modal>
-
-      <Modal open={confirmDelete} onClose={() => setConfirmDelete(false)} title={t.dm.deleteChat} subtitle={t.dm.deleteChatSubtitle}>
-        <ActionForm action={deleteChatAction} className="space-y-4">
-          <input type="hidden" name="roomId" value={roomId} />
-          <p className="text-sm leading-relaxed text-muted">{t.dm.deleteChatConfirm}</p>
-          <div className="flex gap-2">
-            <button type="button" className="btn btn-secondary flex-1" onClick={() => setConfirmDelete(false)}>
-              {t.common.cancel}
-            </button>
-            <SubmitButton className="btn btn-danger flex-1">{t.dm.deleteChat}</SubmitButton>
-          </div>
-        </ActionForm>
       </Modal>
     </>
   );

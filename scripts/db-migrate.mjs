@@ -102,6 +102,14 @@ export const MIGRATIONS = [
      data bytea not null,
      updated_at timestamptz not null default now()
    )`,
+  // v1.7.0 — DM blocks: either side blocking freezes the 1:1 conversation.
+  `create table if not exists user_blocks (
+     id uuid primary key default gen_random_uuid(),
+     blocker_id uuid not null references users(id) on delete cascade,
+     blocked_id uuid not null references users(id) on delete cascade,
+     created_at timestamptz not null default now()
+   )`,
+  `create unique index if not exists user_blocks_pair_idx on user_blocks (blocker_id, blocked_id)`,
 ];
 
 export async function applyMigrations(query) {
