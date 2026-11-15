@@ -307,8 +307,15 @@ export async function getEffectiveMember(room: Room, user: { id: string; display
     return updated;
   }
   // Joined as a logged-in user, or as a guest on this device (the guest
-  // nickname keeps messages continuous with the invite view).
-  const deviceHash = (await readDeviceHash()) ?? "";
+  // nickname keeps messages continuous with the invite view). The device
+  // cookie is unavailable outside a request scope (background jobs, tests) —
+  // there the account-linked membership alone decides.
+  let deviceHash: string | null = null;
+  try {
+    deviceHash = await readDeviceHash();
+  } catch {
+    deviceHash = null;
+  }
   const [joined] = await db
     .select()
     .from(roomMembers)
