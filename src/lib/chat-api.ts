@@ -36,9 +36,9 @@ export async function chatGet(req: Request, room: Room, viewer: ChatViewer, room
   const url = new URL(req.url);
   const afterId = Math.max(0, Number(url.searchParams.get("after") ?? 0) || 0);
   // Mark-as-read: the client sends read=1 only while the tab is visible. Only
-  // authenticated members ("owner"-role rows) bump last_read_at — guests never
-  // do — and a failed write must never break the fetch itself.
-  if (url.searchParams.get("read") === "1" && viewer.role === "owner") {
+  // authenticated members bump last_read_at — /r/<token> guests never do — and
+  // a failed write must never break the fetch itself.
+  if (url.searchParams.get("read") === "1" && (viewer.role === "owner" || viewer.markRead)) {
     try {
       await db.update(roomMembers).set({ lastReadAt: new Date() }).where(eq(roomMembers.id, viewer.memberId));
     } catch (error) {

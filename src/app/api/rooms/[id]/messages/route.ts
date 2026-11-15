@@ -4,7 +4,7 @@ import { roomMembers, users } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
 import { chatDelete, chatGet, chatJson, chatPost } from "@/lib/chat-api";
 import type { ChatRoomOverride } from "@/lib/chat";
-import { getAccessibleRoom, getOwnerMember } from "@/lib/rooms";
+import { getAccessibleRoom, getEffectiveMember } from "@/lib/rooms";
 import { getSettings } from "@/lib/settings";
 import { ensurePoller } from "@/lib/telegram/poller";
 
@@ -12,7 +12,7 @@ export const dynamic = "force-dynamic";
 
 type Ctx = { params: Promise<{ id: string }> };
 
-/** Chat API — requires the owner's session (rooms) or participation (1:1 chats). */
+/** Chat API — requires the owner's session (rooms) or participation (1:1 chats + joined rooms). */
 async function resolve(ctx: Ctx) {
   const { id } = await ctx.params;
   const user = await getCurrentUser();
@@ -22,7 +22,17 @@ async function resolve(ctx: Ctx) {
   const room = await getAccessibleRoom(user.id, id);
   if (!room) return { error: chatJson({ error: "gone" }, 404) };
   if (room.isDisabled) return { error: chatJson({ error: "disabled" }, 403) };
-  const member = await getOwnerMember(room, user);
+  const member = await getEffectiveMember(room, user);
+  const nickname = member.nickname || user.displayName;
+  const viewer = {
+    memberId: member.id,
+    nickname,
+    role: member.role === "owner" ? ("owner" as const) : ("guest" as const),
+    // The dashboard viewer is authenticated — their read state always advances,
+    // even inside a room they JOINED (guest-role membership).
+    markRead: true,
+    authorName: nickname,
+  };
   let override: ChatRoomOverride | undefined;
   if (room.type === "dm") {
     const [peer] = await db
@@ -38,11 +48,7 @@ async function resolve(ctx: Ctx) {
       description: "",
     };
   }
-  return {
-    room,
-    viewer: { memberId: member.id, nickname: user.displayName, role: "owner" as const, authorName: user.displayName },
-    override,
-  };
+  return { room, viewer, override };
 }
 
 export async function GET(req: Request, ctx: Ctx) {

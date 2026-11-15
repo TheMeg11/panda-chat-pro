@@ -66,11 +66,19 @@ export function ChatListPanel({ chats: initialChats, user, roomLimit, totalRooms
   const [totalRooms, setTotalRooms] = useState(initialTotal);
   const [loaded, setLoaded] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const tickRef = useRef(0);
 
   // §4.4: fetch the conversation list client-side, never from SSR HTML.
+  // v1.6.0 live sync: the list now POLLS while the dashboard is open — new
+  // messages refresh previews/unread dots, joined rooms and incoming DMs
+  // appear without any navigation, and every entry into the site syncs
+  // immediately (mount + tab-visible + window focus).
   useEffect(() => {
     let cancelled = false;
+    let busy = false;
     const load = async () => {
+      if (cancelled || busy) return;
+      busy = true;
       try {
         const res = await fetch("/api/chats", { cache: "no-store" });
         if (!res.ok) return;
@@ -82,11 +90,30 @@ export function ChatListPanel({ chats: initialChats, user, roomLimit, totalRooms
         /* offline — keep whatever we have */
       } finally {
         if (!cancelled) setLoaded(true);
+        busy = false;
       }
     };
     void load();
+    const timer = window.setInterval(() => {
+      // hidden tabs sync 4× slower (the notify runtime keeps its own cadence)
+      if (document.hidden && tickRef.current % 4 !== 0) {
+        tickRef.current += 1;
+        return;
+      }
+      tickRef.current += 1;
+      void load();
+    }, 4000);
+    const onVisible = () => {
+      if (!document.hidden) void load();
+    };
+    const onFocus = () => void load();
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", onFocus);
     return () => {
       cancelled = true;
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", onFocus);
     };
   }, [pathname]);
 

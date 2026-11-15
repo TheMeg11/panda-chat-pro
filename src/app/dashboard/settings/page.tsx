@@ -18,7 +18,7 @@ import { requireUser } from "@/lib/auth";
 import { formatNumber } from "@/lib/i18n";
 import { getI18n } from "@/lib/i18n-server";
 import { getSettings } from "@/lib/settings";
-import { getPlatformBot } from "@/lib/telegram/platform";
+import { getPlatformBot, getPlatformOwnerId } from "@/lib/telegram/platform";
 import { BOT_COMMANDS, linkForUser } from "@/lib/telegram/service";
 import { is2faEnabled } from "@/lib/twofactor";
 import { fmt } from "@/lib/utils";
@@ -60,7 +60,7 @@ function describeAgent(ua: string | null) {
 export default async function AccountPage() {
   const user = await requireUser();
   const { t, lang } = await getI18n();
-  const [list, ownedRooms, settings, link, bot, twofa] = await Promise.all([
+  const [list, ownedRooms, settings, link, bot, twofa, ownerId] = await Promise.all([
     db
       .select()
       .from(sessions)
@@ -71,6 +71,7 @@ export default async function AccountPage() {
     linkForUser(user.id),
     getPlatformBot(),
     is2faEnabled(user.id),
+    getPlatformOwnerId(),
   ]);
 
   let mutedRooms: Array<{ id: string; name: string }> = [];
@@ -312,6 +313,8 @@ export default async function AccountPage() {
           paid={settings.telegramPaid}
           allowed={user.canUseTelegram}
           botUsername={bot.botUsername}
+          isOwner={user.id === ownerId}
+          bot={{ configured: bot.configured, source: bot.source, lastError: bot.lastError, hint: bot.hint }}
           link={
             link
               ? {
@@ -319,6 +322,7 @@ export default async function AccountPage() {
                   username: link.username,
                   forwardEnabled: link.forwardEnabled,
                   offlineNotify: link.offlineNotify,
+                  announceEnabled: link.announceEnabled,
                   allowBotDm: link.allowBotDm,
                   mutedRooms,
                 }

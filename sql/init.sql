@@ -273,6 +273,12 @@ ALTER TABLE messages ADD COLUMN IF NOT EXISTS gif_id varchar(64);
 
 -- Digest ping when a linked user has been away for 15+ minutes.
 ALTER TABLE telegram_links ADD COLUMN IF NOT EXISTS offline_notify boolean NOT NULL DEFAULT false;
+-- v1.6.0: new links get the offline digest unless they opt out (existing rows keep their value).
+ALTER TABLE telegram_links ALTER COLUMN offline_notify SET DEFAULT true;
+
+-- Per-user platform-announcement delivery via the bot (v1.6.0).
+ALTER TABLE telegram_links ADD COLUMN IF NOT EXISTS announce_enabled boolean NOT NULL DEFAULT true;
+ALTER TABLE telegram_links ADD COLUMN IF NOT EXISTS announced_at timestamptz;
 
 -- Profile avatar bytes (one per account; a new upload replaces the old row).
 CREATE TABLE IF NOT EXISTS user_avatars (

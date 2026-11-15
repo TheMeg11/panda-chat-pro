@@ -6,8 +6,15 @@ import { db } from "@/db";
 import { telegramLinkCodes, telegramLinks } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
 import { rateLimit } from "@/lib/rate-limit";
-import { getSettings } from "@/lib/settings";
-import { getPlatformBot, tg } from "@/lib/telegram/platform";
+import { getSettings, updateSettings } from "@/lib/settings";
+import {
+  clearPlatformBotToken,
+  getPlatformBot,
+  isPlatformOwner,
+  savePlatformBotToken,
+  TelegramError,
+  tg,
+} from "@/lib/telegram/platform";
 import { createLinkCode, linkForUser } from "@/lib/telegram/service";
 import type { ActionState } from "@/lib/utils";
 
@@ -90,4 +97,63 @@ export async function telegramOfflineNotifyAction(_prev: ActionState, formData: 
   if (updated.length === 0) return { error: "telegramNotLinked" };
   revalidatePath("/dashboard/settings");
   return { ok: true, message: enabled ? "account.tgOfflineNotifyOn" : "account.tgOfflineNotifyOff" };
+}
+
+/** Per-user platform-announcements switch (independent of forwarding/notify). */
+export async function telegramAnnounceAction(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  const user = await getCurrentUser();
+  if (!user) return { error: "unauthorized" };
+  const enabled = formData.get("enabled") === "1";
+  const updated = await db
+    .update(telegramLinks)
+    .set({ announceEnabled: enabled, updatedAt: new Date() })
+    .where(eq(telegramLinks.userId, user.id))
+    .returning({ id: telegramLinks.id });
+  if (updated.length === 0) return { error: "telegramNotLinked" };
+  revalidatePath("/dashboard/settings");
+  return { ok: true, message: enabled ? "account.tgAnnounceOn" : "account.tgAnnounceOff" };
+}
+
+/* ------------------------------------------------------------------ */
+/* Official bot setup — v1.6.0, from the SITE (owner-only)              */
+/*                                                                      */
+/* The Super Admin console remains the full management surface; these   */
+/* actions exist so the platform owner can never be locked out of bot   */
+/* configuration (lost ADMIN_PATH, fresh deployment, phone-only).       */
+/* ------------------------------------------------------------------ */
+
+/** Saves + verifies the official platform bot token. Platform owner only. */
+export async function savePlatformBotAction(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  const user = await getCurrentUser();
+  if (!user || !(await isPlatformOwner(user))) return { error: "unauthorized" };
+  if (!rateLimit(`botsetup:${user.id}`, 10, 10 * 60_000).ok) return { error: "rateLimited" };
+  const token = String(formData.get("token") ?? "").trim();
+  if (!token) return { error: "telegramTokenRequired" };
+  try {
+    const { botUsername } = await savePlatformBotToken(token);
+    revalidatePath("/dashboard/settings");
+    return { ok: true, message: "account.tgBotSaved", data: { botUsername } };
+  } catch (error) {
+    const text = error instanceof TelegramError ? error.message : "";
+    return { error: "telegramTokenRejected", data: { detail: text.slice(0, 160) } };
+  }
+}
+
+/** Removes the stored platform bot token (env fallback applies, if any). */
+export async function clearPlatformBotAction(_prev: ActionState, _formData: FormData): Promise<ActionState> {
+  const user = await getCurrentUser();
+  if (!user || !(await isPlatformOwner(user))) return { error: "unauthorized" };
+  await clearPlatformBotToken();
+  revalidatePath("/dashboard/settings");
+  return { ok: true, message: "account.tgBotCleared" };
+}
+
+/** Toggles paid mode (who may connect the bot) from the site. Owner only. */
+export async function telegramPaidModeAction(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  const user = await getCurrentUser();
+  if (!user || !(await isPlatformOwner(user))) return { error: "unauthorized" };
+  const enabled = formData.get("enabled") === "1";
+  await updateSettings({ telegramPaid: enabled });
+  revalidatePath("/dashboard/settings");
+  return { ok: true, message: enabled ? "account.tgPaidOn" : "account.tgPaidOff" };
 }

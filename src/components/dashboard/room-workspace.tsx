@@ -61,6 +61,8 @@ type Tab = "share" | "security" | "telegram" | "members" | "settings";
 
 type Props = {
   room: WorkspaceRoom;
+  /** false for rooms the viewer JOINED (not owned) — the manage drawer is owner-only */
+  isOwner: boolean;
   snapshot: ChatSnapshot;
   members: WorkspaceMember[];
   telegram: WorkspaceTelegram;
@@ -69,7 +71,7 @@ type Props = {
 };
 
 export function RoomWorkspace(props: Props) {
-  const { room, snapshot, maxLength } = props;
+  const { room, snapshot, maxLength, isOwner } = props;
   const { t } = useI18n();
   const [view, setView] = useState<"chat" | "manage">("chat");
 
@@ -79,19 +81,25 @@ export function RoomWorkspace(props: Props) {
         <Link href="/dashboard" className="btn btn-ghost btn-icon btn-sm" aria-label={t.room.allRooms}>
           <ChevronLeft className="size-4 rtl:rotate-180" />
         </Link>
-        <div className="seg flex-1">
-          <button type="button" data-active={view === "chat"} className="seg-item flex-1" onClick={() => setView("chat")}>
-            <MessageCircle className="size-4" />
-            {t.room.chatTab}
-          </button>
-          <button type="button" data-active={view === "manage"} className="seg-item flex-1" onClick={() => setView("manage")}>
-            <Settings2 className="size-4" />
-            {t.room.manageTab}
-          </button>
-        </div>
+        {isOwner ? (
+          <div className="seg flex-1">
+            <button type="button" data-active={view === "chat"} className="seg-item flex-1" onClick={() => setView("chat")}>
+              <MessageCircle className="size-4" />
+              {t.room.chatTab}
+            </button>
+            <button type="button" data-active={view === "manage"} className="seg-item flex-1" onClick={() => setView("manage")}>
+              <Settings2 className="size-4" />
+              {t.room.manageTab}
+            </button>
+          </div>
+        ) : (
+          <p className="flex-1 truncate text-sm font-extrabold text-ink" dir="auto">
+            {room.name}
+          </p>
+        )}
       </div>
       <div className="flex min-h-0 flex-1">
-        <section className={cn("min-w-0 flex-1 flex-col", view === "chat" ? "flex" : "hidden", "lg:flex")}>
+        <section className={cn("min-w-0 flex-1 flex-col", view === "chat" || !isOwner ? "flex" : "hidden", "lg:flex")}>
           {room.isDisabled ? (
             <div className="grid h-full place-items-center p-6">
               <div className="card max-w-md p-8 text-center">
@@ -115,15 +123,17 @@ export function RoomWorkspace(props: Props) {
             />
           )}
         </section>
-        <aside
-          className={cn(
-            "w-full shrink-0 flex-col border-line bg-surface lg:w-[400px] lg:border-s xl:w-[430px]",
-            view === "manage" ? "flex" : "hidden",
-            "lg:flex",
-          )}
-        >
-          <RoomManager {...props} />
-        </aside>
+        {isOwner ? (
+          <aside
+            className={cn(
+              "w-full shrink-0 flex-col border-line bg-surface lg:w-[400px] lg:border-s xl:w-[430px]",
+              view === "manage" ? "flex" : "hidden",
+              "lg:flex",
+            )}
+          >
+            <RoomManager {...props} />
+          </aside>
+        ) : null}
       </div>
     </div>
   );

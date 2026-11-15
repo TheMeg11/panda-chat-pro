@@ -249,24 +249,81 @@ export const DM_LIMIT = 100;
 /** Both participants of a DM are logged-in users, so the "owner:" device-hash namespace is used. */
 export const dmDeviceHash = (userId: string) => `owner:${userId}`;
 
-/** Room access for logged-in users: own rooms (any type) + DMs they participate in. */
-export async function getAccessibleRoom(userId: string, roomId: string): Promise<Room | null> {
+/** Room access for logged-in users: own rooms, DMs they participate in, and rooms they JOINED. */
+export async function getAccessibleRoom(userId: string, roomId: string, deviceHash?: string | null): Promise<Room | null> {
   const room = await getRoomById(roomId);
   if (!room) return null;
   if (room.ownerId === userId) return room;
-  if (room.type !== "dm") return null;
+  if (room.type === "dm") {
+    // DMs stay strictly private: only the account-linked owner-role row grants access.
+    const [dm] = await db
+      .select({ id: roomMembers.id })
+      .from(roomMembers)
+      .where(
+        and(
+          eq(roomMembers.roomId, room.id),
+          eq(roomMembers.deviceHash, dmDeviceHash(userId)),
+          eq(roomMembers.role, "owner"),
+        ),
+      )
+      .limit(1);
+    return dm ? room : null;
+  }
+  // Rooms JOINED through an invite: guest-role membership linked to the
+  // account, or to this device when the join happened while logged out.
   const [member] = await db
     .select({ id: roomMembers.id })
     .from(roomMembers)
     .where(
       and(
         eq(roomMembers.roomId, room.id),
-        eq(roomMembers.deviceHash, dmDeviceHash(userId)),
-        eq(roomMembers.role, "owner"),
+        eq(roomMembers.status, "active"),
+        isNotNull(roomMembers.nickname),
+        or(eq(roomMembers.userId, userId), ...(deviceHash ? [eq(roomMembers.deviceHash, deviceHash)] : [])),
       ),
     )
+    .orderBy(desc(roomMembers.lastSeenAt))
     .limit(1);
   return member ? room : null;
+}
+
+/**
+ * The member row that represents THIS user in THIS room — used everywhere the
+ * dashboard opens a conversation, so a JOINED room keeps its guest identity
+ * instead of being promoted to a phantom owner row by getOwnerMember.
+ */
+export async function getEffectiveMember(room: Room, user: { id: string; displayName: string }): Promise<RoomMember> {
+  const ownerHash = dmDeviceHash(user.id);
+  const [own] = await db
+    .select()
+    .from(roomMembers)
+    .where(and(eq(roomMembers.roomId, room.id), eq(roomMembers.deviceHash, ownerHash)))
+    .limit(1);
+  if (own) {
+    // Own room / DM: keep the display name in sync (same contract as getOwnerMember).
+    const nickname = user.displayName.slice(0, 32);
+    if (own.nickname === nickname) return own;
+    const [updated] = await db.update(roomMembers).set({ nickname }).where(eq(roomMembers.id, own.id)).returning();
+    return updated;
+  }
+  // Joined as a logged-in user, or as a guest on this device (the guest
+  // nickname keeps messages continuous with the invite view).
+  const deviceHash = (await readDeviceHash()) ?? "";
+  const [joined] = await db
+    .select()
+    .from(roomMembers)
+    .where(
+      and(
+        eq(roomMembers.roomId, room.id),
+        eq(roomMembers.status, "active"),
+        isNotNull(roomMembers.nickname),
+        or(eq(roomMembers.userId, user.id), ...(deviceHash ? [eq(roomMembers.deviceHash, deviceHash)] : [])),
+      ),
+    )
+    .orderBy(desc(roomMembers.lastSeenAt))
+    .limit(1);
+  if (joined) return joined;
+  return getOwnerMember(room, user);
 }
 
 /** Returns the existing 1:1 chat between two users or creates it (race-safe via advisory lock). */
@@ -345,7 +402,7 @@ export type DashboardChat = {
  * 1:1 chats they participate in — with last-message previews. Deliberately does
  * NOT count hidden chats anywhere: the client hides vault rooms before paint.
  */
-export async function listDashboardChats(user: { id: string; displayName: string }): Promise<DashboardChat[]> {
+export async function listDashboardChats(user: { id: string; displayName: string }, deviceHash?: string | null): Promise<DashboardChat[]> {
   const hash = dmDeviceHash(user.id);
   const rows = await db
     .select({ room: rooms })
@@ -357,6 +414,15 @@ export async function listDashboardChats(user: { id: string; displayName: string
           eq(rooms.type, "dm"),
           sql`exists (select 1 from room_members m where m.room_id = ${rooms.id} and m.device_hash = ${hash} and m.role = 'owner')`,
         ),
+        // Rooms the user JOINED — account-linked membership, or a guest join
+        // made on this device (v1.6.0: joined rooms finally appear in the list).
+        sql`exists (
+          select 1 from room_members m
+          where m.room_id = ${rooms.id}
+            and m.status = 'active'
+            and m.nickname is not null
+            and (m.user_id = ${user.id}${deviceHash ? sql` or m.device_hash = ${deviceHash}` : sql``})
+        )`,
       ),
     )
     .orderBy(desc(rooms.lastActivityAt))
@@ -406,10 +472,10 @@ export async function listDashboardChats(user: { id: string; displayName: string
   }
 
   // Unread flag — one query with an EXISTS subselect per room. The viewer's
-  // member row always carries device_hash "owner:<userId>" (own rooms + DMs),
-  // so the join covers both room types. Messages count as unread when they are
-  // newer than COALESCE(last_read_at, member created_at), not deleted, not
-  // self-destructed yet, and were written by someone OTHER than this member
+  // member row carries device_hash "owner:<userId>" (own rooms + DMs) or is a
+  // joined guest row (user_id / device hash). Messages count as unread when
+  // they are newer than COALESCE(last_read_at, member created_at), not deleted,
+  // not self-destructed yet, and were written by someone OTHER than this member
   // (member_id differs; system events are ignored).
   const unreadRows = await db.execute(sql`
     select rm.room_id,
@@ -423,7 +489,8 @@ export async function listDashboardChats(user: { id: string; displayName: string
           and m.created_at > coalesce(rm.last_read_at, rm.created_at)
       ) as has_unread
     from room_members rm
-    where rm.device_hash = ${hash}
+    where rm.status = 'active'
+      and (rm.device_hash = ${hash} or rm.user_id = ${user.id}${deviceHash ? sql` or rm.device_hash = ${deviceHash}` : sql``})
       and rm.room_id in (${sql.join(roomIds.map((id) => sql`${id}`), sql`, `)})`);
   const unreadMap = new Map<string, boolean>();
   for (const row of unreadRows.rows as unknown as Array<{ room_id: string; has_unread: boolean }>) {

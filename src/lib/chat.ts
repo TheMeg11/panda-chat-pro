@@ -47,7 +47,7 @@ export type ChatRoomInfo = {
   direct?: boolean;
 };
 
-export type Viewer = { memberId: string; nickname: string; role: "owner" | "guest" };
+export type Viewer = { memberId: string; nickname: string; role: "owner" | "guest"; /** dashboard viewers mark conversations read even as a joined guest */ markRead?: boolean };
 
 export type ChatSnapshot = {
   messages: ChatMessage[];

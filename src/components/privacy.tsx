@@ -152,10 +152,11 @@ export function HideRoomModal({
 /**
  * v1.5.3 — hide a chat by PRESSING AND HOLDING it for 5 seconds.
  *
- * Wraps a chat card (or any element). While held, a progress bar sweeps the
- * top edge so the gesture is visible; releasing early cancels silently. The
- * browser context menu (long-press on touch) and the card's click/navigation
- * are suppressed while the hold is in progress or after it completed.
+ * Wraps a chat card (or any element). v1.6.0: the hold is deliberately SILENT —
+ * no progress bar and no "holding…" label (user request: keep the behaviour,
+ * drop the visuals). Releasing early cancels silently; the browser context
+ * menu (long-press on touch) and the card's click/navigation are suppressed
+ * while the hold is in progress or after it completed.
  */
 export function HoldToHide({
   roomId,
@@ -172,13 +173,12 @@ export function HoldToHide({
 }) {
   const { t } = useI18n();
   const [modal, setModal] = useState(false);
-  const [progress, setProgress] = useState<number | null>(null); // 0..1, null = idle
-  const timer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const doneRef = useRef(false);
 
   const clearTimer = () => {
     if (timer.current) {
-      clearInterval(timer.current);
+      clearTimeout(timer.current);
       timer.current = null;
     }
   };
@@ -186,29 +186,19 @@ export function HoldToHide({
   const start = () => {
     if (disabled || modal) return;
     doneRef.current = false;
-    const t0 = Date.now();
-    setProgress(0);
-    timer.current = setInterval(() => {
-      const p = Math.min(1, (Date.now() - t0) / HOLD_TO_HIDE_MS);
-      setProgress(p);
-      if (p >= 1) {
-        clearTimer();
-        setProgress(null);
-        doneRef.current = true;
-        try {
-          navigator.vibrate?.(60);
-        } catch {
-          /* unsupported */
-        }
-        setModal(true);
+    timer.current = setTimeout(() => {
+      timer.current = null;
+      doneRef.current = true;
+      try {
+        navigator.vibrate?.(60);
+      } catch {
+        /* unsupported */
       }
-    }, 50);
+      setModal(true);
+    }, HOLD_TO_HIDE_MS);
   };
 
-  const stop = () => {
-    clearTimer();
-    setProgress(null);
-  };
+  const stop = () => clearTimer();
 
   useEffect(() => () => clearTimer(), []);
 
@@ -236,26 +226,6 @@ export function HoldToHide({
       }}
     >
       {children}
-      {/* hold progress bar along the card's top edge */}
-      {progress !== null ? (
-        <div
-          className="pointer-events-none absolute inset-x-0 top-0 z-20 h-1 overflow-hidden rounded-t-xl"
-          aria-hidden="true"
-        >
-          <div
-            className="h-full bg-accent transition-none"
-            style={{ width: `${Math.round(progress * 100)}%` }}
-          />
-        </div>
-      ) : null}
-      {progress !== null ? (
-        <div
-          className="pointer-events-none absolute inset-x-2 bottom-1 z-20 rounded-lg bg-surface/90 px-2 py-1 text-center text-[10.5px] font-bold text-ink shadow-soft backdrop-blur"
-          aria-hidden="true"
-        >
-          {t.privacy.holding}
-        </div>
-      ) : null}
       <HideRoomModal roomId={roomId} open={modal} onClose={() => setModal(false)} onHidden={onHidden} />
     </div>
   );

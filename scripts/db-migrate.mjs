@@ -93,6 +93,9 @@ export const MIGRATIONS = [
   `alter table room_members add column if not exists tg_notified_at timestamptz`,
   `alter table messages add column if not exists gif_id varchar(64)`,
   `alter table telegram_links add column if not exists offline_notify boolean not null default false`,
+  `alter table telegram_links alter column offline_notify set default true`,
+  `alter table telegram_links add column if not exists announce_enabled boolean not null default true`,
+  `alter table telegram_links add column if not exists announced_at timestamptz`,
   `create table if not exists user_avatars (
      user_id uuid primary key references users(id) on delete cascade,
      mime varchar(32) not null,

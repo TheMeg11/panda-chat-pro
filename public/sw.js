@@ -5,7 +5,7 @@
  * Only immutable build assets and app icons are cached (cache-first) to make
  * the installed app start instantly and work briefly offline.
  */
-const CACHE = "pc-static-v4";
+const CACHE = "pc-static-v5";
 const PRECACHE = ["/manifest.webmanifest", "/icons/icon-32.png", "/icons/icon-192.png", "/icons/icon-512.png"];
 
 self.addEventListener("install", (event) => {
@@ -23,6 +23,25 @@ self.addEventListener("activate", (event) => {
       .keys()
       .then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k))))
       .then(() => self.clients.claim()),
+  );
+});
+
+/* New-message notifications (v1.6.0): clicking focuses the open app or opens
+ * the conversation — the ONLY reliable path on Android / installed PWA. */
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const url = new URL(event.notification.data?.url || "/dashboard", self.location.origin).href;
+  event.waitUntil(
+    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((list) => {
+      for (const client of list) {
+        if (client.url.startsWith(self.location.origin)) {
+          void client.focus();
+          if ("navigate" in client && !client.url.startsWith(url)) void client.navigate(url);
+          return;
+        }
+      }
+      return self.clients.openWindow(url);
+    }),
   );
 });
 

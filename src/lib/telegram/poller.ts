@@ -2,7 +2,7 @@ import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { platformSettings } from "@/db/schema";
 import { getSettings } from "../settings";
-import { sweepOfflineNotifications } from "./offline-notify";
+import { sweepAnnouncements, sweepOfflineNotifications } from "./offline-notify";
 import { getPlatformBot, recordPlatformBotError, tg, TelegramError } from "./platform";
 import { BOT_COMMANDS, handleUpdate, type TgUpdate } from "./service";
 import { registerAdminCommands, tryHandleSuperadmin } from "./superadmin";
@@ -46,6 +46,7 @@ function ensureOfflineNotifySweep() {
   unref(
     setInterval(() => {
       void sweepOfflineNotifications().catch((error) => console.error("[panda-chat] offline notify sweep failed", error));
+      void sweepAnnouncements().catch((error) => console.error("[panda-chat] announcement sweep failed", error));
     }, 5 * 60_000),
   );
 }

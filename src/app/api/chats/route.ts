@@ -1,5 +1,5 @@
 import { getCurrentUser } from "@/lib/auth";
-import { listDashboardChats } from "@/lib/rooms";
+import { listDashboardChats, readDeviceHash } from "@/lib/rooms";
 import { getSettings, roomLimitFor } from "@/lib/settings";
 
 export const dynamic = "force-dynamic";
@@ -19,7 +19,7 @@ export async function GET() {
   const settings = await getSettings();
   if (settings.maintenanceMode) return Response.json({ error: "maintenance" }, { status: 503 });
 
-  const chats = await listDashboardChats(user);
+  const chats = await listDashboardChats(user, await readDeviceHash());
   const totalRooms = chats.filter((c) => c.type === "room" && c.isOwner).length;
   return Response.json(
     { chats, totalRooms, roomLimit: roomLimitFor(user, settings) },

@@ -10,7 +10,7 @@ import { buildSnapshot } from "@/lib/chat";
 import { getConfig } from "@/lib/config";
 import { getI18n } from "@/lib/i18n-server";
 import { getBaseUrl } from "@/lib/request";
-import { getAccessibleRoom, getOwnerMember, listMembers } from "@/lib/rooms";
+import { getAccessibleRoom, getEffectiveMember, listMembers, readDeviceHash } from "@/lib/rooms";
 import { getSettings } from "@/lib/settings";
 import { linkForUser } from "@/lib/telegram/service";
 import { BOT_COMMANDS } from "@/lib/telegram/service";
@@ -26,11 +26,17 @@ export async function generateMetadata(): Promise<Metadata> {
 export default async function RoomPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const user = await requireUser();
-  const room = await getAccessibleRoom(user.id, id);
+  const room = await getAccessibleRoom(user.id, id, await readDeviceHash());
   if (!room) notFound();
 
-  const member = await getOwnerMember(room, user);
-  const viewer = { memberId: member.id, nickname: user.displayName, role: "owner" as const };
+  const member = await getEffectiveMember(room, user);
+  const isOwner = room.ownerId === user.id;
+  const viewer = {
+    memberId: member.id,
+    nickname: member.nickname || user.displayName,
+    role: member.role === "owner" ? ("owner" as const) : ("guest" as const),
+    markRead: true,
+  };
 
   /* ------------------------------ 1:1 private chat ------------------------------ */
   if (room.type === "dm") {
@@ -96,12 +102,14 @@ export default async function RoomPage({ params }: { params: Promise<{ id: strin
         id: room.id,
         name: room.name,
         description: room.description,
-        inviteUrl: `${baseUrl}/r/${room.inviteToken}`,
+        // Invite link ships only to the owner — joined members must never see it.
+        inviteUrl: isOwner ? `${baseUrl}/r/${room.inviteToken}` : "",
         hasPassword: Boolean(room.passwordHash),
         isLocked: room.isLocked,
         isDisabled: room.isDisabled,
         defaultTtl: room.defaultTtl ?? null,
       }}
+      isOwner={isOwner}
       snapshot={snapshot}
       members={members
         .filter((m) => m.role === "guest")

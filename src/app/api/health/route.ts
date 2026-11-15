@@ -1,6 +1,7 @@
 import { db } from "@/db";
 import { sql } from "drizzle-orm";
 import { ensurePoller } from "@/lib/telegram/poller";
+import { APP_VERSION } from "@/lib/version";
 
 export const dynamic = "force-dynamic";
 
@@ -12,7 +13,9 @@ export async function GET() {
     // throws here.
     await db.execute(sql`select 1 from platform_settings limit 1`);
     ensurePoller();
-    return Response.json({ ok: true, db: "ready" });
+    // `ver` doubles as the deploy marker — the live site can be checked
+    // against the repo version without any authentication.
+    return Response.json({ ok: true, db: "ready", ver: APP_VERSION });
   } catch {
     // Either the DB is unreachable or sql/init.sql was never applied
     // (e.g. pre-deploy step skipped) — either way the app cannot serve.

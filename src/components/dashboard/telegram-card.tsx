@@ -1,14 +1,17 @@
 "use client";
 
-import { useActionState, useEffect } from "react";
+import { useActionState, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { BellOff, ExternalLink, Lock, Send, Terminal, Unplug } from "lucide-react";
+import { BellOff, Bot, ExternalLink, Lock, Send, Terminal, Unplug } from "lucide-react";
 import { roomAction } from "@/app/actions/rooms";
 import {
+  savePlatformBotAction,
   startTelegramLinkAction,
+  telegramAnnounceAction,
   telegramBotDmAction,
   telegramForwardAction,
   telegramOfflineNotifyAction,
+  telegramPaidModeAction,
   telegramUnlinkAction,
 } from "@/app/actions/telegram";
 import { useI18n } from "@/components/i18n-provider";
@@ -21,19 +24,108 @@ export type TelegramCardProps = {
   paid: boolean;
   allowed: boolean;
   botUsername: string | null;
+  /** v1.6.0 — platform-owner surface: the official bot is configurable from the site */
+  isOwner?: boolean;
+  /** current official-bot state for the owner card */
+  bot?: { configured: boolean; source: string; lastError: string | null; hint: string | null };
   link: {
     chatName: string;
     username: string | null;
     forwardEnabled: boolean;
     offlineNotify: boolean;
+    announceEnabled?: boolean;
     allowBotDm: boolean;
     mutedRooms: Array<{ id: string; name: string }>;
   } | null;
   commands: Array<{ command: string; description: string }>;
 };
 
+/** Owner-only: the official platform bot, configurable from the site. */
+function OwnerBotPanel({ telegramEnabled, paid, bot }: { telegramEnabled: boolean; paid: boolean; bot: NonNullable<TelegramCardProps["bot"]> }) {
+  const { t } = useI18n();
+  const [saveState, saveFormAction, saving] = useActionState(savePlatformBotAction, {});
+  const [, paidFormAction] = useActionState(telegramPaidModeAction, {});
+
+  return (
+    <div className="mt-5 space-y-4 rounded-2xl border border-sky/40 bg-sky-soft/30 p-4">
+      <div className="flex flex-wrap items-center gap-3">
+        <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-sky-soft text-sky-ink">
+          <Bot className="size-5" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-extrabold text-ink">{t.account.tgBotOwnerTitle}</p>
+          <p className="mt-0.5 text-xs leading-relaxed text-muted">{t.account.tgBotOwnerHint}</p>
+        </div>
+        <span
+          className={cn(
+            "badge",
+            bot.configured && !bot.lastError ? "badge-mint" : "bg-amber-soft text-amber-ink",
+          )}
+        >
+          {bot.configured ? (bot.lastError ? t.account.tgBotErrorBadge : t.account.tgBotLiveBadge) : t.account.tgBotUnconfiguredBadge}
+        </span>
+      </div>
+
+      {bot.lastError ? <p className="notice notice-rose">{bot.lastError}</p> : null}
+      {bot.configured ? (
+        <p className="font-mono text-xs text-muted" dir="ltr">
+          {bot.hint} · {bot.source}
+        </p>
+      ) : null}
+
+      <form action={saveFormAction} className="space-y-2">
+        <input
+          type="password"
+          name="token"
+          autoComplete="off"
+          dir="ltr"
+          placeholder="123456789:AA…"
+          className="input font-mono text-xs"
+          aria-label={t.account.tgBotTokenLabel}
+        />
+        {saveState.error ? (
+          <p role="alert" className="notice notice-rose">
+            {errorText(t, saveState.error)}
+            {typeof saveState.data?.detail === "string" && saveState.data.detail ? <span dir="ltr"> — {saveState.data.detail}</span> : null}
+          </p>
+        ) : null}
+        {saveState.ok ? <p className="notice notice-mint">{t.account.tgBotSaved}</p> : null}
+        <SubmitButton className="btn btn-primary btn-sm" disabled={saving} aria-busy={saving}>
+          <Send className="size-4" />
+          {saving ? t.account.tgBotSaving : t.account.tgBotSave}
+        </SubmitButton>
+      </form>
+
+      <ActionForm action={telegramPaidModeAction} showMessage={false} className="flex items-center justify-between gap-4">
+        <input type="hidden" name="enabled" value={paid ? "0" : "1"} />
+        <div>
+          <p className="text-sm font-bold text-ink">{t.account.tgPaidModeTitle}</p>
+          <p className="mt-0.5 text-xs leading-relaxed text-muted">{t.account.tgPaidModeHint}</p>
+        </div>
+        <SubmitButton className="rounded-full p-0.5" title={t.account.tgPaidModeTitle}>
+          <span
+            className={cn(
+              "relative block h-[1.45rem] w-10 rounded-full transition",
+              paid ? "bg-gradient-to-r from-accent to-accent-2" : "bg-line-strong",
+            )}
+          >
+            <span
+              className={cn(
+                "absolute top-[3px] size-[calc(1.45rem-6px)] rounded-full bg-white shadow transition-all",
+                paid ? "start-[calc(100%-1.45rem+3px)]" : "start-[3px]",
+              )}
+            />
+          </span>
+        </SubmitButton>
+      </ActionForm>
+
+      {!telegramEnabled ? <p className="notice notice-amber">{t.account.tgDisabledPlatform}</p> : null}
+    </div>
+  );
+}
+
 /** The glassy panel that pairs a Panda Chat account with the official Telegram bot. */
-export function TelegramCard({ telegramEnabled, paid, allowed, botUsername, link, commands }: TelegramCardProps) {
+export function TelegramCard({ telegramEnabled, paid, allowed, botUsername, isOwner, bot, link, commands }: TelegramCardProps) {
   const { t } = useI18n();
   const router = useRouter();
   const [state, formAction, pending] = useActionState(startTelegramLinkAction, {});
@@ -45,7 +137,8 @@ export function TelegramCard({ telegramEnabled, paid, allowed, botUsername, link
     return () => clearInterval(id);
   }, [state.data?.url, link, router]);
 
-  const toggleDisabled = !telegramEnabled || (paid && !allowed);
+  // The platform owner is never locked out of their own bot by paid mode.
+  const toggleDisabled = !telegramEnabled || (paid && !allowed && !isOwner);
 
   return (
     <section id="telegram" className="glass card scroll-mt-20 border-white/40 p-5 shadow-glass sm:p-6">
@@ -71,9 +164,12 @@ export function TelegramCard({ telegramEnabled, paid, allowed, botUsername, link
         ) : null}
       </div>
 
+      {/* v1.6.0 — official-bot setup, owner only (the token never leaves the server unencrypted) */}
+      {isOwner && bot ? <OwnerBotPanel telegramEnabled={telegramEnabled} paid={paid} bot={bot} /> : null}
+
       {!telegramEnabled ? (
         <p className="notice notice-amber mt-5">{t.account.tgDisabledPlatform}</p>
-      ) : paid && !allowed ? (
+      ) : paid && !allowed && !isOwner ? (
         <div className="mt-5 rounded-2xl border border-amber/40 bg-amber-soft/60 p-5">
           <p className="flex items-center gap-2 font-extrabold text-amber-ink">
             <Lock className="size-4" />
@@ -180,6 +276,30 @@ export function TelegramCard({ telegramEnabled, paid, allowed, botUsername, link
                   className={cn(
                     "absolute top-[3px] size-[calc(1.45rem-6px)] rounded-full bg-white shadow transition-all",
                     link.offlineNotify ? "start-[calc(100%-1.45rem+3px)]" : "start-[3px]",
+                  )}
+                />
+              </span>
+            </SubmitButton>
+          </ActionForm>
+
+          {/* v1.6.0 — platform announcements (اطلاع‌رسانی) as its own switch */}
+          <ActionForm action={telegramAnnounceAction} showMessage={false} className="flex items-center justify-between gap-4 rounded-2xl border border-line bg-surface-2/50 p-4">
+            <input type="hidden" name="enabled" value={link.announceEnabled === false ? "1" : "0"} />
+            <div>
+              <p className="text-sm font-bold text-ink">{t.account.tgAnnounce}</p>
+              <p className="mt-0.5 text-xs leading-relaxed text-muted">{t.account.tgAnnounceHint}</p>
+            </div>
+            <SubmitButton className="rounded-full p-0.5" title={t.account.tgAnnounce}>
+              <span
+                className={cn(
+                  "relative block h-[1.45rem] w-10 rounded-full transition",
+                  link.announceEnabled !== false ? "bg-gradient-to-r from-accent to-accent-2" : "bg-line-strong",
+                )}
+              >
+                <span
+                  className={cn(
+                    "absolute top-[3px] size-[calc(1.45rem-6px)] rounded-full bg-white shadow transition-all",
+                    link.announceEnabled !== false ? "start-[calc(100%-1.45rem+3px)]" : "start-[3px]",
                   )}
                 />
               </span>

@@ -1,6 +1,6 @@
 import { eq, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { roomMembers } from "@/db/schema";
+import { platformSettings, roomMembers, telegramLinks } from "@/db/schema";
 import { getSettings } from "../settings";
 import { getPlatformBot, tg } from "./platform";
 
@@ -110,6 +110,63 @@ export async function sweepOfflineNotifications(): Promise<number> {
     return sent;
   } catch (error) {
     console.error("[panda-chat] offline notify sweep failed", error);
+    return 0;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Platform announcements (v1.6.0) — one delivery per announcement      */
+/*                                                                      */
+/* Every linked user with announce_enabled ON gets the CURRENT platform */
+/* announcement exactly once: the sweep stamps announced_at after a     */
+/* successful send and re-sends only when the announcement row changes  */
+/* (platform_settings.updated_at moves forward). Independent of the     */
+/* message-forwarding and offline-notify switches — the user asked for  */
+/* notifications, messages and announcements to be separately tunable.  */
+/* ------------------------------------------------------------------ */
+
+export async function sweepAnnouncements(): Promise<number> {
+  try {
+    const settings = await getSettings();
+    if (!settings.telegramEnabled) return 0;
+    const bot = await getPlatformBot();
+    if (!bot.configured) return 0;
+
+    const [row] = await db
+      .select({ value: platformSettings.value, updatedAt: platformSettings.updatedAt })
+      .from(platformSettings)
+      .where(eq(platformSettings.key, "announcement"))
+      .limit(1);
+    const text = typeof row?.value === "string" ? row.value.trim() : "";
+    if (!text || !row?.updatedAt) return 0;
+
+    const targets = await db.execute(sql`
+      select tl.id, tl.chat_id
+      from telegram_links tl
+      join users u on u.id = tl.user_id
+      where tl.announce_enabled = true
+        and u.status = 'active'
+        and u.can_use_telegram = true
+        and (tl.announced_at is null or tl.announced_at < ${row.updatedAt.toISOString()}::timestamptz)
+      limit 100`);
+    let sent = 0;
+    for (const t of targets.rows as unknown as Array<{ id: string; chat_id: string }>) {
+      try {
+        await tg(bot.token, "sendMessage", {
+          chat_id: t.chat_id,
+          text: `📣 <b>پاندا چت — اطلاع‌رسانی</b>\n\n${esc(text.slice(0, 3000))}`,
+          parse_mode: "HTML",
+          link_preview_options: { is_disabled: true },
+        });
+        await db.update(telegramLinks).set({ announcedAt: new Date() }).where(eq(telegramLinks.id, t.id));
+        sent += 1;
+      } catch (error) {
+        console.error("[panda-chat] announcement send failed", error);
+      }
+    }
+    return sent;
+  } catch (error) {
+    console.error("[panda-chat] announcement sweep failed", error);
     return 0;
   }
 }

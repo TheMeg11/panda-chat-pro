@@ -380,8 +380,12 @@ export const telegramLinks = pgTable(
     allowBotDm: boolean("allow_bot_dm").notNull().default(false),
     /** master switch for message forwarding */
     forwardEnabled: boolean("forward_enabled").notNull().default(true),
-    /** digest ping when the user has been away for 15+ minutes (offline notify) */
-    offlineNotify: boolean("offline_notify").notNull().default(false),
+    /** digest ping when the user has been away for 15+ minutes (on by default since v1.6.0) */
+    offlineNotify: boolean("offline_notify").notNull().default(true),
+    /** receive PLATFORM ANNOUNCEMENTS via the bot (v1.6.0, independent switch) */
+    announceEnabled: boolean("announce_enabled").notNull().default(true),
+    /** when the CURRENT platform announcement was last delivered to this user */
+    announcedAt: ts("announced_at"),
     /** rooms muted for notifications (uuid strings) */
     mutedRooms: jsonb("muted_rooms").$type<string[]>().notNull().default([]),
     createdAt: ts("created_at").notNull().defaultNow(),

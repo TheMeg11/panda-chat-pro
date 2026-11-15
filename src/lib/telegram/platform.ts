@@ -1,6 +1,6 @@
-import { eq } from "drizzle-orm";
+import { asc, eq } from "drizzle-orm";
 import { db } from "@/db";
-import { platformSettings } from "@/db/schema";
+import { platformSettings, users } from "@/db/schema";
 import { decryptSecret, encryptSecret } from "../crypto";
 
 /**
@@ -147,6 +147,39 @@ function invalidate() {
 
 function requestPollerSync() {
   (globalThis as typeof globalThis & { __pcPollerSync?: () => void }).__pcPollerSync?.();
+}
+
+const gOwner = globalThis as typeof globalThis & { __pcOwnerId?: { id: string | null; at: number } };
+
+/**
+ * v1.6.0 — the PLATFORM OWNER on the site itself: the first registered active
+ * account. The Super Admin console stays the full management surface; this
+ * identity only unlocks the in-site "official bot" setup card (token, paid
+ * mode) so the owner is never locked out of bot configuration by a lost
+ * ADMIN_PATH. Cached for 30s.
+ */
+export async function getPlatformOwnerId(): Promise<string | null> {
+  const cached = gOwner.__pcOwnerId;
+  if (cached && Date.now() - cached.at < 30_000) return cached.id;
+  let id: string | null = null;
+  try {
+    const [row] = await db
+      .select({ id: users.id })
+      .from(users)
+      .where(eq(users.status, "active"))
+      .orderBy(asc(users.createdAt))
+      .limit(1);
+    id = row?.id ?? null;
+  } catch {
+    /* table not ready */
+  }
+  gOwner.__pcOwnerId = { id, at: Date.now() };
+  return id;
+}
+
+export async function isPlatformOwner(user: { id: string } | null | undefined): Promise<boolean> {
+  if (!user) return false;
+  return (await getPlatformOwnerId()) === user.id;
 }
 
 /** Validates + stores the bot token. Throws TelegramError on rejection. */

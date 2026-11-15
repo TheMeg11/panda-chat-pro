@@ -5,11 +5,38 @@ import { useI18n } from "@/components/i18n-provider";
 import { getNotifyPrefs, type NotifyPrefs } from "@/lib/local-store";
 import type { DashboardChat } from "@/lib/rooms";
 
-const POLL_MS = 20_000;
-/** While the tab is hidden the poll runs only every 3rd tick (~60s). */
+const POLL_MS = 10_000;
+/** While the tab is hidden the poll runs only every 3rd tick (~30s). */
 const HIDDEN_EVERY = 3;
 
 type ChatListResponse = { chats?: DashboardChat[] };
+
+/**
+ * Show a system notification through the BEST available channel:
+ * the service-worker registration first (the ONLY path that works on
+ * Android/installed PWA — the `new Notification()` constructor is not
+ * available there), then the classic constructor.
+ */
+async function showNotification(title: string, options: NotificationOptions): Promise<boolean> {
+  try {
+    const reg = (await navigator.serviceWorker?.getRegistration?.()) ?? null;
+    if (reg) {
+      await reg.showNotification(title, options);
+      return true;
+    }
+  } catch {
+    /* fall through to the constructor */
+  }
+  if (typeof Notification !== "undefined" && Notification.permission === "granted") {
+    try {
+      new Notification(title, options);
+      return true;
+    } catch {
+      /* constructor can throw on some platforms */
+    }
+  }
+  return false;
+}
 
 /**
  * Dashboard notification runtime — no props, renders nothing.
@@ -136,25 +163,17 @@ export function NotifyManager() {
           if (prev.get(chat.id)) continue; // only false → true flips
           if (!chat.hasUnread) continue;
           if (openId !== null && chat.id === openId) continue;
-          if (prefs.enabled && typeof Notification !== "undefined" && Notification.permission === "granted") {
+          if (prefs.enabled) {
             const snippet = prefs.preview ? chat.lastMessage?.body ?? "" : "";
-            try {
-              // `renotify` re-alerts on repeated notifications with the same tag; it is
-              // not in every TS lib.dom revision, hence the widened options object.
-              const options = {
-                body: prefs.preview && snippet ? snippet.slice(0, 80) : t.notify.newMessageBody,
-                tag: `pc-${chat.id}`,
-                icon: "/icons/icon-192.png",
-                renotify: true,
-              } as NotificationOptions;
-              const n = new Notification(chat.name, options);
-              n.onclick = () => {
-                window.focus();
-                location.assign(`/dashboard/rooms/${chat.id}`);
-              };
-            } catch {
-              /* constructor can throw on some platforms — ignore */
-            }
+            // Click routing lives in the service worker (notificationclick →
+            // focus or open /dashboard/rooms/<id> from notification.data.url).
+            await showNotification(chat.name, {
+              body: prefs.preview && snippet ? snippet.slice(0, 80) : t.notify.newMessageBody,
+              tag: `pc-${chat.id}`,
+              icon: "/icons/icon-192.png",
+              data: { url: `/dashboard/rooms/${chat.id}` },
+              renotify: true,
+            } as NotificationOptions);
           }
           if (prefs.sound) ding();
         }

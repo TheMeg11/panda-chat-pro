@@ -45,9 +45,21 @@ export function NotificationsCard() {
     save({ enabled: next });
   };
 
-  /** Fires a sample system notification plus the soft WebAudio ding. */
-  const sendTest = () => {
-    if (typeof Notification !== "undefined" && Notification.permission === "granted") {
+  /** Fires a sample system notification plus the soft WebAudio ding.
+   * Uses the service-worker registration first — on Android/installed PWA the
+   * `new Notification()` constructor does not exist. */
+  const sendTest = async () => {
+    let shown = false;
+    try {
+      const reg = (await navigator.serviceWorker?.getRegistration?.()) ?? null;
+      if (reg && Notification.permission === "granted") {
+        await reg.showNotification("Panda Chat", { body: t.notify.testBody, silent: true });
+        shown = true;
+      }
+    } catch {
+      /* fall through */
+    }
+    if (!shown && typeof Notification !== "undefined" && Notification.permission === "granted") {
       try {
         new Notification("Panda Chat", { body: t.notify.testBody, silent: true });
       } catch {
@@ -126,7 +138,7 @@ export function NotificationsCard() {
           <h2 className="font-extrabold text-ink">{t.notify.title}</h2>
           <p className="mt-1 text-sm text-muted">{t.notify.subtitle}</p>
         </div>
-        <button type="button" className="btn btn-soft btn-sm" onClick={sendTest}>
+        <button type="button" className="btn btn-soft btn-sm" onClick={() => void sendTest()}>
           {t.notify.test}
         </button>
       </div>
