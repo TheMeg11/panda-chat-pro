@@ -1,13 +1,104 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { useActionState, useEffect, useState } from "react";
 import Link from "next/link";
+import { RefreshCw } from "lucide-react";
 import { login2faAction, loginAction, registerAction } from "@/app/actions/auth";
 import { confirmPasswordResetAction, requestPasswordResetAction } from "@/app/actions/password-reset";
 import { useI18n } from "./i18n-provider";
 import { errorText, tr } from "@/lib/i18n";
 import { ActionForm, PasswordInput, SubmitButton } from "./ui";
 import type { ActionState } from "@/lib/utils";
+
+/**
+ * v1.8.0 — built-in math CAPTCHA for the register form. A fresh challenge is
+ * fetched from /api/register/captcha (locale-aware digits); the signed token
+ * and the user's answer travel with the form and are verified server-side.
+ */
+function CaptchaField() {
+  const { t } = useI18n();
+  const [challenge, setChallenge] = useState<{ question: string; token: string } | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  const load = () => {
+    // Re-run the fetch effect by reusing the same loader logic inline.
+    setLoading(true);
+    void (async () => {
+      try {
+        const res = await fetch("/api/register/captcha", { cache: "no-store" });
+        if (!res.ok) throw new Error(String(res.status));
+        const data = (await res.json()) as { question: string; token: string };
+        setChallenge(data);
+      } catch {
+        /* offline — keep the previous challenge */
+      } finally {
+        setLoading(false);
+      }
+    })();
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      setLoading(true);
+      try {
+        const res = await fetch("/api/register/captcha", { cache: "no-store" });
+        if (!res.ok) throw new Error(String(res.status));
+        const data = (await res.json()) as { question: string; token: string };
+        if (!cancelled) setChallenge(data);
+      } catch {
+        /* offline — the field stays in its loading state */
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  return (
+    <div>
+      <label className="label" htmlFor="captcha-answer">
+        {t.auth.captchaLabel}
+      </label>
+      <div className="flex items-center gap-2">
+        <span
+          className="flex h-10 min-w-24 select-none items-center justify-center rounded-xl border border-line bg-surface-2 px-3 font-mono text-base font-extrabold tracking-widest text-ink"
+          dir="ltr"
+          aria-live="polite"
+        >
+          {loading || !challenge ? "…" : challenge.question}
+        </span>
+        <input
+          id="captcha-answer"
+          name="captchaAnswer"
+          className="input h-10 flex-1"
+          inputMode="numeric"
+          autoComplete="off"
+          required
+          maxLength={4}
+          dir="ltr"
+          placeholder={t.auth.captchaPlaceholder}
+          aria-label={t.auth.captchaLabel}
+        />
+        <button
+          type="button"
+          onClick={load}
+          className="btn btn-ghost btn-icon h-10 w-10 shrink-0"
+          aria-label={t.auth.captchaRefresh}
+          title={t.auth.captchaRefresh}
+          disabled={loading}
+        >
+          <RefreshCw className={loading ? "size-4 animate-spin" : "size-4"} />
+        </button>
+      </div>
+      {/* the signed token rides along hidden — verified server-side */}
+      <input type="hidden" name="captchaToken" value={challenge?.token ?? ""} />
+      <p className="hint">{t.auth.captchaHint}</p>
+    </div>
+  );
+}
 
 function RememberMe() {
   const { t } = useI18n();
@@ -324,6 +415,7 @@ export function RegisterForm() {
           </div>
         </div>
         <p className="hint -mt-2">{t.auth.passwordHint}</p>
+        <CaptchaField />
         <RememberMe />
         <SubmitButton className="btn btn-primary btn-lg w-full">{t.auth.submitRegister}</SubmitButton>
       </ActionForm>

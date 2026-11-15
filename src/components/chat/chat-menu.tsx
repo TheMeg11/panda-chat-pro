@@ -80,7 +80,12 @@ export function ChatHamburgerMenu({ roomId, variant, isOwner, blocked, onAfterAc
       {open ? (
         <>
           <button type="button" className="fixed inset-0 z-40 cursor-default" onClick={() => setOpen(false)} aria-hidden="true" tabIndex={-1} />
-          <div className="pop-in absolute end-0 top-[2.6rem] z-50 w-72 overflow-hidden rounded-2xl border border-line bg-surface p-2 shadow-float">
+          {/* v1.8.0 — the menu lives in its own layer anchored to the panel's
+              edge (w-full up to 18rem, clamped by max-w so it can never
+              overflow the drawer). The old end-0 dropdown was clipped by the
+              panel's overflow-hidden and crashed into the header text. */}
+          <div className="pop-in absolute end-0 top-[2.75rem] z-50 w-[min(18rem,calc(100vw-3rem))] max-w-[calc(100vw-3rem)] overflow-hidden rounded-2xl border border-line bg-surface p-2 shadow-float">
+            <div className="max-h-[min(26rem,60vh)] overflow-y-auto overscroll-contain">
             {/* ---- chat actions ---- */}
             {variant === "dm" ? (
               <form
@@ -163,6 +168,7 @@ export function ChatHamburgerMenu({ roomId, variant, isOwner, blocked, onAfterAc
                 {t.common.logout}
               </button>
             </form>
+            </div>
           </div>
         </>
       ) : null}
@@ -225,9 +231,11 @@ export function DmProfilePanel({ roomId, open, onClose, peer, avatarSrc, blocked
       {open ? (
         <>
           <button type="button" className="fixed inset-0 z-40 cursor-default bg-black/40" onClick={onClose} aria-hidden="true" tabIndex={-1} />
-          <div className="pop-in fixed inset-x-3 top-16 z-50 mx-auto max-w-md overflow-hidden rounded-3xl border border-line bg-surface shadow-float sm:inset-x-auto sm:end-6" role="dialog" aria-label={t.dm.profileTitle}>
-            <div className="relative flex items-center justify-end border-b border-line px-2 py-2">
-              <p className="absolute inset-x-0 text-center text-sm font-extrabold text-ink">{t.dm.profileTitle}</p>
+          {/* v1.8.0 — near-fullscreen card on phones (inset-x-2, top-12) so the
+              ☰ menu inside has room to breathe; fixed drawer on sm+. */}
+          <div className="pop-in fixed inset-x-2 top-12 z-50 mx-auto max-w-md rounded-3xl border border-line bg-surface shadow-float sm:inset-x-auto sm:end-6 sm:top-16" role="dialog" aria-label={t.dm.profileTitle}>
+            <div className="relative flex items-center justify-end gap-1 border-b border-line px-2 py-2">
+              <p className="pointer-events-none absolute inset-x-0 text-center text-sm font-extrabold text-ink">{t.dm.profileTitle}</p>
               <ChatHamburgerMenu roomId={roomId} variant="dm" isOwner blocked={blocked} className="z-10" />
               <button type="button" className="btn btn-ghost btn-icon z-10" onClick={onClose} aria-label={t.common.close}>
                 <X className="size-5" />
@@ -320,9 +328,9 @@ export function JoinedRoomInfoPanel({
       {open ? (
         <>
           <button type="button" className="fixed inset-0 z-40 cursor-default bg-black/40" onClick={onClose} aria-hidden="true" tabIndex={-1} />
-          <div className="pop-in fixed inset-x-3 top-16 z-50 mx-auto max-w-md overflow-hidden rounded-3xl border border-line bg-surface shadow-float sm:inset-x-auto sm:end-6" role="dialog" aria-label={name}>
-            <div className="relative flex items-center justify-end border-b border-line px-2 py-2">
-              <p className="absolute inset-x-0 text-center text-sm font-extrabold text-ink" dir="auto">
+          <div className="pop-in fixed inset-x-2 top-12 z-50 mx-auto max-w-md rounded-3xl border border-line bg-surface shadow-float sm:inset-x-auto sm:end-6 sm:top-16" role="dialog" aria-label={name}>
+            <div className="relative flex items-center justify-end gap-1 border-b border-line px-2 py-2">
+              <p className="pointer-events-none absolute inset-x-0 text-center text-sm font-extrabold text-ink" dir="auto">
                 {name}
               </p>
               <ChatHamburgerMenu roomId={roomId} variant="room" isOwner={false} className="z-10" />

@@ -1,7 +1,8 @@
 "use client";
 
 import { useActionState, useState } from "react";
-import { LockKeyhole, Timer } from "lucide-react";
+import Link from "next/link";
+import { ChevronLeft, LockKeyhole, Timer } from "lucide-react";
 import { publishE2eeKeyAction, setRoomE2eeAction, setRoomTtlAction } from "@/app/actions/e2ee";
 import { ChatView } from "@/components/chat/chat-view";
 import { DmProfilePanel } from "@/components/chat/chat-menu";
@@ -77,6 +78,16 @@ export function DmWorkspace({ roomId, peer, blocked, snapshot, maxLength, e2ee }
         initial={dmSnapshot}
         maxLength={maxLength}
         onHeaderOpen={() => setProfileOpen(true)}
+        /* v1.8.0 — back to the chat list on phones (Telegram pattern); hidden
+           on md+ where the list pane is already visible. */
+        headerStart={
+          <Link href="/dashboard" className="btn btn-ghost btn-icon btn-sm -ms-1 md:hidden" aria-label={t.room.allRooms}>
+            <ChevronLeft className="size-4 rtl:rotate-180" />
+          </Link>
+        }
+        /* v1.8.0 — DM identity: peer's real avatar everywhere, no owner badge */
+        suppressOwnerBadge
+        peerAvatarSrc={peer.avatarSrc}
       />
 
       {/* Telegram-style profile panel — identity, last seen, ☰ chat actions */}

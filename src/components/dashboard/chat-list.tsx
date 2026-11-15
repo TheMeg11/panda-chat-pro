@@ -346,6 +346,15 @@ export function ChatListPanel({ chats: initialChats, user, roomLimit, totalRooms
               const active = pathname === `/dashboard/rooms/${chat.id}`;
               return (
                 <li key={chat.id} className="relative">
+                  {/* v1.8.0 — red unread dot (Telegram-style): chats with
+                      unread messages are visually flagged at a glance. */}
+                  <span
+                    aria-hidden="true"
+                    className={cn(
+                      "absolute start-[0.45rem] top-1/2 z-10 size-[0.55rem] -translate-y-1/2 rounded-full bg-[#e0355f] shadow-[0_0_0_2px_var(--surface)]",
+                      chat.hasUnread ? "block" : "hidden",
+                    )}
+                  />
                   {/* v1.7.0 — plain Telegram-style cards: the per-card ⋯ menu and
                       the 5-second hold-to-hide are gone; hiding lives in the
                       conversation's profile-panel ☰ menu. */}

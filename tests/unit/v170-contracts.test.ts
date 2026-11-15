@@ -56,7 +56,26 @@ describe("v1.6.0 contracts", () => {
   it("health endpoint exposes the deploy version marker", () => {
     const src = readFileSync(new URL("../../src/app/api/health/route.ts", import.meta.url), "utf8");
     expect(src).toContain("ver: APP_VERSION");
-    expect(APP_VERSION).toBe("1.7.0");
+    expect(APP_VERSION).toBe("1.8.0");
+  });
+
+  it("v1.8.0 mobile UX contracts: unread dot, DM parity, double-tap reply, composer sheet, captcha", () => {
+    // red unread dot on the chat list
+    const list = readFileSync(new URL("../../src/components/dashboard/chat-list.tsx", import.meta.url), "utf8");
+    expect(list).toContain("chat.hasUnread");
+    // DMs: no owner badge + peer avatar + back button
+    const chat = readFileSync(new URL("../../src/components/chat/chat-view.tsx", import.meta.url), "utf8");
+    expect(chat).toContain("suppressOwnerBadge");
+    expect(chat).toContain("peerAvatarSrc");
+    expect(chat).toContain("onDoubleClick");
+    expect(chat).toContain("lastTapRef");
+    expect(chat).toContain("setSheetOpen");
+    const dm = readFileSync(new URL("../../src/components/dashboard/dm-workspace.tsx", import.meta.url), "utf8");
+    expect(dm).toContain('href="/dashboard"');
+    expect(dm).toContain("suppressOwnerBadge");
+    // register captcha is verified server-side
+    const auth = readFileSync(new URL("../../src/app/actions/auth.ts", import.meta.url), "utf8");
+    expect(auth).toContain("verifyCaptcha");
   });
 
   it("announcement sweep + owner bot actions exist", () => {

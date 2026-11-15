@@ -5,6 +5,7 @@ import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { users } from "@/db/schema";
 import { createUserSession, destroyCurrentSession } from "@/lib/auth";
+import { verifyCaptcha } from "@/lib/captcha";
 import { hashPassword, verifyDummyPassword, verifyPassword } from "@/lib/crypto";
 import { notifyLoginDevice } from "@/lib/login-notify";
 import { clearRateLimit, rateLimitDistributed } from "@/lib/rate-limit";
@@ -90,6 +91,14 @@ export async function registerAction(_prev: ActionState, formData: FormData): Pr
   if (!USERNAME_RE.test(username)) return { error: "usernameInvalid" };
   if (password.length < 8 || password.length > 200) return { error: "passwordShort" };
   if (password !== confirm) return { error: "passwordMismatch" };
+
+  // v1.8.0 — built-in math CAPTCHA (stateless, HMAC-signed, 15min window).
+  // Checked BEFORE the rate limiter so wrong answers never consume it, and
+  // right before the limiter so bots burn their attempts on cheap failures.
+  const captchaToken = String(formData.get("captchaToken") ?? "");
+  const captchaAnswer = String(formData.get("captchaAnswer") ?? "");
+  const verdict = verifyCaptcha(captchaToken, captchaAnswer);
+  if (!verdict.ok) return { error: verdict.expired ? "captchaExpired" : "captchaWrong" };
 
   const meta = await requestMeta();
   if (!(await rateLimitDistributed(`register:${meta.ip}`, 10, 60 * 60_000)).ok) return { error: "rateLimited" };

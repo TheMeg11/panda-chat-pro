@@ -10,11 +10,14 @@ import {
   File as FileIcon,
   FileWarning,
   Image as ImageIcon,
+  ImagePlay,
   KeyRound,
   Lock,
   LockKeyhole,
   Music,
   Paperclip,
+  Plus,
+  Smile,
   Timer,
   Unlock,
   Reply,
@@ -59,6 +62,12 @@ type Props = {
    * hiding lives in the panel's ☰ menu instead.
    */
   onHeaderOpen?: () => void;
+  /** v1.8.0 — DMs are peer-to-peer: no member is an "owner", no owner badge. */
+  suppressOwnerBadge?: boolean;
+  /** v1.8.0 — peer avatar URL (Telegram-style header + incoming bubbles in DMs) */
+  peerAvatarSrc?: string;
+  /** v1.8.0 — true for user-to-user chats: swaps member/online counts for the last-seen line */
+  directPeer?: boolean;
 };
 
 type Item =
@@ -85,7 +94,18 @@ function linkify(text: string): ReactNode[] {
   );
 }
 
-export function ChatView({ endpoint, initial, maxLength, headerStart, headerActions, className, onHeaderOpen }: Props) {
+export function ChatView({
+  endpoint,
+  initial,
+  maxLength,
+  headerStart,
+  headerActions,
+  className,
+  onHeaderOpen,
+  suppressOwnerBadge,
+  peerAvatarSrc,
+  directPeer,
+}: Props) {
   const { t, lang } = useI18n();
   const router = useRouter();
   const hydrated = useHydrated();
@@ -117,6 +137,10 @@ export function ChatView({ endpoint, initial, maxLength, headerStart, headerActi
   });
   /** true right after a swipe — the follow-up tap must not toggle the toolbar */
   const suppressClickRef = useRef(false);
+  /* ---- Double-tap-to-reply (touch): a second tap within 320ms on the same
+     bubble replies to it. Mirrors Telegram's gesture; the first tap still
+     toggles the action toolbar, the second one replies. ---- */
+  const lastTapRef = useRef<{ id: number; at: number }>({ id: 0, at: 0 });
 
   /* ---- E2EE (§4.1): keys fetched per conversation, unlocked per session ---- */
   const roomId = initial.room.id;
@@ -129,6 +153,11 @@ export function ChatView({ endpoint, initial, maxLength, headerStart, headerActi
   /* ---- Self-destruct (§4.2) & watermark (§4.11) ---- */
   const [ttlChoice, setTtlChoice] = useState<string>("default");
   const watermark = useLocalFlag("pc-watermark");
+
+  /* ---- v1.8.0 mobile composer: the "+" sheet + controlled pickers ---- */
+  const [sheetOpen, setSheetOpen] = useState(false);
+  const [emojiOpen, setEmojiOpen] = useState(false);
+  const [gifOpen, setGifOpen] = useState(false);
 
   const versionRef = useRef(initial.stateVersion);
   const lastIdRef = useRef(lastId(initial.messages));
@@ -564,12 +593,18 @@ export function ChatView({ endpoint, initial, maxLength, headerStart, headerActi
   return (
     <div className={cn("relative flex h-full min-h-0 flex-col bg-canvas", className)}>
       {/* Room header */}
-      <header className="z-10 flex shrink-0 items-center gap-3 border-b border-line bg-surface/90 px-3 py-2.5 backdrop-blur sm:px-5 sm:py-3">
+      <header className="z-10 flex shrink-0 items-center gap-2 border-b border-line bg-surface/90 px-2 py-2.5 backdrop-blur sm:px-5 sm:py-3">
         {headerStart}
         {(() => {
           const titleBlock = (
             <>
-              <Avatar name={room.name} size={40} square={!room.direct} />
+              <Avatar
+                name={room.name}
+                size={40}
+                square={!room.direct}
+                src={room.direct ? peerAvatarSrc : undefined}
+                className="shrink-0"
+              />
               <div className="min-w-0 flex-1">
                 <h1 className="truncate text-[0.98rem] font-extrabold text-ink" dir="auto">
                   {room.name}
@@ -694,7 +729,9 @@ export function ChatView({ endpoint, initial, maxLength, headerStart, headerActi
                 >
                   {!mine ? (
                     <div className="w-8 shrink-0">
-                      {!cont ? <Avatar name={m.authorName} size={32} className="mt-[1.3rem]" /> : null}
+                      {!cont ? (
+                        <Avatar name={m.authorName} size={32} src={room.direct ? peerAvatarSrc : undefined} className="mt-[1.3rem]" />
+                      ) : null}
                     </div>
                   ) : null}
                   <div className={cn("relative flex min-w-0 max-w-[min(82%,36rem)] flex-col", mine ? "items-end" : "items-start")}>
@@ -703,7 +740,9 @@ export function ChatView({ endpoint, initial, maxLength, headerStart, headerActi
                         <span className="truncate" dir="auto">
                           {m.authorName}
                         </span>
-                        {m.authorRole === "owner" ? (
+                        {/* v1.8.0 — DMs are peer-to-peer: nobody owns the
+                            conversation, so the owner badge never shows there. */}
+                        {m.authorRole === "owner" && !suppressOwnerBadge ? (
                           <span className="badge badge-accent h-[1.15rem] rounded-md px-1.5 text-[10px]">{t.chat.ownerBadge}</span>
                         ) : null}
                       </div>
@@ -723,6 +762,9 @@ export function ChatView({ endpoint, initial, maxLength, headerStart, headerActi
                         }
                         setActiveId(active ? null : m.id);
                       }}
+                      /* Desktop: double-click a bubble to reply to it (the
+                         single click still toggles the action toolbar). */
+                      onDoubleClick={() => startReply(m)}
                       onKeyDown={(e) => {
                         if (e.key === "Enter" || e.key === " ") {
                           e.preventDefault();
@@ -732,6 +774,16 @@ export function ChatView({ endpoint, initial, maxLength, headerStart, headerActi
                       style={{ touchAction: "pan-y" }}
                       onTouchStart={(e) => {
                         const t = e.touches[0];
+                        // Double-tap-to-reply: second tap within 320ms on the
+                        // same bubble → reply. The toolbar stays untouched.
+                        const now = Date.now();
+                        if (lastTapRef.current.id === m.id && now - lastTapRef.current.at < 320) {
+                          lastTapRef.current = { id: 0, at: 0 };
+                          suppressClickRef.current = true;
+                          startReply(m);
+                        } else {
+                          lastTapRef.current = { id: m.id, at: now };
+                        }
                         swipeRef.current = { x: t.clientX, y: t.clientY, el: e.currentTarget, locked: null, moved: 0 };
                       }}
                       onTouchMove={(e) => {
@@ -1013,12 +1065,82 @@ export function ChatView({ endpoint, initial, maxLength, headerStart, headerActi
                   else if (error === "fileTooBig") setError(null);
                 }}
               />
-              <EmojiPicker onPick={insertEmoji} />
+              {/* ---- v1.8.0 mobile composer: ONE "+" button instead of the
+                 emoji/attach/GIF/TTL row that crowded phones. Telegram-style
+                 bottom sheet carries the extras; desktop keeps the old bar. ---- */}
+              <div className="relative shrink-0 md:hidden">
+                <button
+                  type="button"
+                  onClick={() => setSheetOpen((v) => !v)}
+                  className="btn btn-ghost btn-icon size-10 rounded-xl"
+                  aria-label={t.chat.moreTools}
+                  title={t.chat.moreTools}
+                  aria-expanded={sheetOpen}
+                >
+                  <Plus className={cn("size-[22px] transition-transform", sheetOpen && "rotate-45")} />
+                </button>
+                {sheetOpen ? (
+                  <>
+                    <button type="button" className="fixed inset-0 z-30 cursor-default" onClick={() => setSheetOpen(false)} aria-hidden="true" tabIndex={-1} />
+                    <div className="pop-in absolute bottom-full mb-2 start-0 z-40 w-56 rounded-2xl border border-line bg-surface p-1.5 shadow-float">
+                      <SheetItem
+                        icon={<Smile className="size-[18px]" />}
+                        label="Emoji"
+                        onClick={() => {
+                          setSheetOpen(false);
+                          setEmojiOpen(true);
+                        }}
+                      />
+                      <SheetItem
+                        icon={<Paperclip className="size-[18px]" />}
+                        label={t.chat.attach}
+                        onClick={() => {
+                          setSheetOpen(false);
+                          fileInputRef.current?.click();
+                        }}
+                      />
+                      {me.role !== "guest" && !room.e2eeEnabled ? (
+                        <SheetItem
+                          icon={<ImagePlay className="size-[18px]" />}
+                          label="GIF"
+                          onClick={() => {
+                            setSheetOpen(false);
+                            setGifOpen(true);
+                          }}
+                        />
+                      ) : null}
+                      <div className="my-1 border-t border-line" />
+                      <label className="flex w-full cursor-pointer items-center gap-2.5 rounded-xl px-3 py-2 text-sm font-semibold text-ink transition hover:bg-surface-3">
+                        <Timer className="size-[18px] text-muted" />
+                        <span className="flex-1 text-start">{t.selfdestruct.title}</span>
+                        <select
+                          value={ttlChoice}
+                          onChange={(e) => setTtlChoice(e.target.value)}
+                          className="h-8 cursor-pointer rounded-lg border border-line bg-surface-2 px-1.5 text-[11px] font-semibold text-muted outline-none"
+                          aria-label={t.selfdestruct.title}
+                        >
+                          <option value="default">{room.defaultTtl ? (room.defaultTtl === 3600 ? t.selfdestruct.oneHour : room.defaultTtl === 86400 ? t.selfdestruct.oneDay : t.selfdestruct.oneWeek) : t.selfdestruct.off}</option>
+                          <option value="off">{t.selfdestruct.off}</option>
+                          <option value="3600">{t.selfdestruct.oneHour}</option>
+                          <option value="86400">{t.selfdestruct.oneDay}</option>
+                          <option value="604800">{t.selfdestruct.oneWeek}</option>
+                        </select>
+                      </label>
+                    </div>
+                  </>
+                ) : null}
+              </div>
+              <EmojiPicker
+                onPick={insertEmoji}
+                open={emojiOpen}
+                onOpenChange={setEmojiOpen}
+                className="hidden md:block"
+              />
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
                 disabled={composerLocked || sending}
-                className="btn btn-ghost btn-icon size-10 shrink-0 rounded-xl"
+                className="btn btn-ghost btn-icon size-10 shrink-0 rounded-xl hidden md:inline-flex"
                 aria-label={t.chat.attach}
                 title={t.chat.attach}
               >
@@ -1026,12 +1148,18 @@ export function ChatView({ endpoint, initial, maxLength, headerStart, headerActi
               </button>
               {/* GIFs: authenticated members of non-E2EE rooms only (API-side rule mirrored here). */}
               {me.role !== "guest" && !room.e2eeEnabled ? (
-                <GifPicker onPick={(gifId) => void sendGif(gifId)} disabled={sending} />
+                <GifPicker
+                  onPick={(gifId) => void sendGif(gifId)}
+                  disabled={sending}
+                  open={gifOpen}
+                  onOpenChange={setGifOpen}
+                  className="hidden md:block"
+                />
               ) : null}
               <select
                 value={ttlChoice}
                 onChange={(e) => setTtlChoice(e.target.value)}
-                className="h-9 shrink-0 cursor-pointer rounded-lg border border-line bg-surface-2 px-1.5 text-[11px] font-semibold text-muted outline-none transition hover:border-line-strong"
+                className="h-9 shrink-0 cursor-pointer rounded-lg border border-line bg-surface-2 px-1.5 text-[11px] font-semibold text-muted outline-none transition hover:border-line-strong hidden md:block"
                 aria-label={t.selfdestruct.title}
                 title={t.selfdestruct.title}
                 data-tutorial="composer"
@@ -1137,6 +1265,20 @@ function ToolButton({
       )}
     >
       {children}
+    </button>
+  );
+}
+
+/** v1.8.0 — one row of the mobile composer's "+" sheet. */
+function SheetItem({ icon, label, onClick }: { icon: ReactNode; label: string; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm font-semibold text-ink transition hover:bg-surface-3"
+    >
+      <span className="text-muted">{icon}</span>
+      {label}
     </button>
   );
 }

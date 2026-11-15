@@ -3,8 +3,16 @@
 import { useEffect, useRef, useState } from "react";
 import { ImagePlay } from "lucide-react";
 import { useI18n } from "@/components/i18n-provider";
+import { cn } from "@/lib/utils";
 
-type Props = { onPick: (gifId: string) => void; disabled?: boolean };
+type Props = {
+  onPick: (gifId: string) => void;
+  disabled?: boolean;
+  /** v1.8.0 controlled mode: lets the mobile "+" sheet open the picker. */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  className?: string;
+};
 type GifThumb = { id: string; title: string };
 /** /api/gifs/search payload: results, or a typed degradation reason. */
 type SearchResponse = { gifs?: GifThumb[]; error?: "unconfigured" | "invalid-key" | "network" };
@@ -19,9 +27,15 @@ const DEBOUNCE_MS = 400;
  * Degrades gracefully: "unconfigured"/"invalid-key" answers show a specific
  * actionable message; "network" keeps the generic retry hint.
  */
-export function GifPicker({ onPick, disabled }: Props) {
+export function GifPicker({ onPick, disabled, open: openProp, onOpenChange, className }: Props) {
   const { t } = useI18n();
-  const [open, setOpen] = useState(false);
+  // Controlled when props are given, self-managed otherwise.
+  const [selfOpen, setSelfOpen] = useState(false);
+  const open = openProp ?? selfOpen;
+  const setOpen = (v: boolean) => {
+    setSelfOpen(v);
+    onOpenChange?.(v);
+  };
   const [q, setQ] = useState("");
   const [gifs, setGifs] = useState<GifThumb[]>([]);
   const [loading, setLoading] = useState(false);
@@ -91,22 +105,25 @@ export function GifPicker({ onPick, disabled }: Props) {
   const query = q.trim();
 
   return (
-    <div className="relative shrink-0">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        disabled={disabled}
-        className="btn btn-ghost btn-icon size-10 shrink-0 rounded-xl"
-        aria-label="GIF"
-        title="GIF"
-      >
-        <ImagePlay className="size-[18px]" />
-      </button>
+    <div className={cn("relative shrink-0", className)}>
+      {/* In controlled mode (mobile sheet) the trigger lives in the parent. */}
+      {openProp === undefined ? (
+        <button
+          type="button"
+          onClick={() => setOpen(!open)}
+          disabled={disabled}
+          className="btn btn-ghost btn-icon size-10 shrink-0 rounded-xl"
+          aria-label="GIF"
+          title="GIF"
+        >
+          <ImagePlay className="size-[18px]" />
+        </button>
+      ) : null}
       {open ? (
         <>
           {/* Outside-click shield (chat-list menu pattern). */}
           <button type="button" className="fixed inset-0 z-30 cursor-default" onClick={() => setOpen(false)} aria-hidden="true" tabIndex={-1} />
-          <div className="pop-in absolute bottom-full mb-2 start-0 z-40 w-80 rounded-2xl border border-line bg-surface p-2 shadow-float sm:w-96">
+          <div className="pop-in absolute bottom-full mb-2 start-0 z-40 w-[min(20rem,calc(100vw-2.5rem))] rounded-2xl border border-line bg-surface p-2 shadow-float sm:w-96">
             <input
               type="search"
               value={q}

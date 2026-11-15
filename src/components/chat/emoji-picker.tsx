@@ -4,7 +4,13 @@ import { useEffect, useState, type ComponentType, type ReactNode } from "react";
 import { Clock, Dog, Heart, Lightbulb, Pizza, Smile, Trophy } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-type Props = { onPick: (emoji: string) => void };
+type Props = {
+  onPick: (emoji: string) => void;
+  /** v1.8.0 controlled mode: lets the mobile "+" sheet open the picker. */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  className?: string;
+};
 
 /* ------------------------------------------------------------------ */
 /* Curated popular sets (~330 total)                                    */
@@ -98,8 +104,14 @@ function saveRecents(list: string[]) {
  * tab backed by localStorage. Picking an emoji reports it to the parent (which
  * inserts it at the caret) and refreshes the recents list.
  */
-export function EmojiPicker({ onPick }: Props) {
-  const [open, setOpen] = useState(false);
+export function EmojiPicker({ onPick, open: openProp, onOpenChange, className }: Props) {
+  // Controlled when props are given, self-managed otherwise.
+  const [selfOpen, setSelfOpen] = useState(false);
+  const open = openProp ?? selfOpen;
+  const setOpen = (v: boolean) => {
+    setSelfOpen(v);
+    onOpenChange?.(v);
+  };
   const [tab, setTab] = useState("faces");
   const [recents, setRecents] = useState<string[]>([]);
 
@@ -124,6 +136,7 @@ export function EmojiPicker({ onPick }: Props) {
 
   const pick = (emoji: string) => {
     onPick(emoji);
+    setOpen(false); // pick-and-close (both the desktop and the sheet flow)
     setRecents((prev) => {
       const next = [emoji, ...prev.filter((e) => e !== emoji)].slice(0, MAX_RECENTS);
       saveRecents(next);
@@ -134,21 +147,24 @@ export function EmojiPicker({ onPick }: Props) {
   const active = tab === "recents" ? recents : (CATEGORIES.find((c) => c.id === tab) ?? CATEGORIES[0]).emojis;
 
   return (
-    <div className="relative shrink-0">
-      <button
-        type="button"
-        onClick={toggle}
-        className="btn btn-ghost btn-icon size-10 shrink-0 rounded-xl"
-        aria-label="Emoji"
-        title="Emoji"
-      >
-        <Smile className="size-[18px]" />
-      </button>
+    <div className={cn("relative shrink-0", className)}>
+      {/* In controlled mode (mobile sheet) the trigger lives in the parent. */}
+      {openProp === undefined ? (
+        <button
+          type="button"
+          onClick={toggle}
+          className="btn btn-ghost btn-icon size-10 shrink-0 rounded-xl"
+          aria-label="Emoji"
+          title="Emoji"
+        >
+          <Smile className="size-[18px]" />
+        </button>
+      ) : null}
       {open ? (
         <>
           {/* Outside-click shield (chat-list menu pattern). */}
           <button type="button" className="fixed inset-0 z-30 cursor-default" onClick={() => setOpen(false)} aria-hidden="true" tabIndex={-1} />
-          <div className="pop-in absolute bottom-full mb-2 start-0 z-40 w-72 rounded-2xl border border-line bg-surface p-2 shadow-float sm:w-80">
+          <div className="pop-in absolute bottom-full mb-2 start-0 z-40 w-[min(18rem,calc(100vw-2.5rem))] rounded-2xl border border-line bg-surface p-2 shadow-float sm:w-80">
             <div className="flex items-center gap-1 border-b border-line pb-1.5" role="tablist" aria-label="Emoji categories">
               {recents.length > 0 ? (
                 <TabButton active={tab === "recents"} onClick={() => setTab("recents")}>
