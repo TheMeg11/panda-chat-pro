@@ -56,7 +56,7 @@ describe("v1.6.0 contracts", () => {
   it("health endpoint exposes the deploy version marker", () => {
     const src = readFileSync(new URL("../../src/app/api/health/route.ts", import.meta.url), "utf8");
     expect(src).toContain("ver: APP_VERSION");
-    expect(APP_VERSION).toBe("1.6.0");
+    expect(APP_VERSION).toBe("1.7.0");
   });
 
   it("announcement sweep + owner bot actions exist", () => {
