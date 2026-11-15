@@ -283,7 +283,9 @@ export function ChatCardOptions({ chat }: { chat: DashboardChat }) {
 
   return (
     <div
-      className="relative"
+      // positions like the old hide button did: anchored to the chat-card <li>
+      // (relative) — NOT its own wrapper, which would offset it out of the card
+      className="absolute end-2.5 top-2.5 z-10"
       data-chat-options-root=""
       // the ⋯ control is INSIDE the HoldToHide wrapper — its own pointer
       // interaction must never start (or cancel-conflict with) the hold timer
@@ -302,7 +304,7 @@ export function ChatCardOptions({ chat }: { chat: DashboardChat }) {
           setMenuOpen((v) => !v);
           setConfirmDelete(false);
         }}
-        className="absolute end-2.5 top-2.5 z-10 grid size-8 place-items-center rounded-lg bg-surface/80 text-faint opacity-0 backdrop-blur transition hover:bg-surface-3 hover:text-ink focus-visible:opacity-100 group-hover:opacity-100 max-md:opacity-60"
+        className="grid size-8 place-items-center rounded-lg bg-surface/80 text-faint opacity-0 backdrop-blur transition hover:bg-surface-3 hover:text-ink focus-visible:opacity-100 group-hover:opacity-100 max-md:opacity-60"
       >
         <MoreHorizontal className="size-4" />
       </button>
@@ -321,7 +323,7 @@ export function ChatCardOptions({ chat }: { chat: DashboardChat }) {
             tabIndex={-1}
           />
           <div
-            className="pop-in absolute end-2 top-11 z-40 w-60 overflow-hidden rounded-2xl border border-line bg-surface p-2 shadow-float"
+            className="pop-in absolute end-0 top-9 z-40 w-60 overflow-hidden rounded-2xl border border-line bg-surface p-2 shadow-float"
             onClick={(e) => {
               e.preventDefault();
               e.stopPropagation();
