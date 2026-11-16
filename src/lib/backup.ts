@@ -129,6 +129,15 @@ export async function allowedChatIds(): Promise<string[]> {
   return [...new Set([...backupChatIds(), config.chatId].filter(Boolean))];
 }
 
+/**
+ * Telegram USER ids that may issue super-admin commands. In private chats
+ * chat.id === from.id, so this is the same set — but checking the sender id
+ * explicitly keeps admin commands from leaking into forwarded contexts.
+ */
+export function allowedSenderIds(): string[] {
+  return backupChatIds();
+}
+
 /** The backup encryption key: BACKUP_ENCRYPTION_KEY (preferred, kept offline) or APP_SECRET-derived. */
 export function backupEncryptionKey(): Buffer {
   const custom = (process.env.BACKUP_ENCRYPTION_KEY ?? "").trim();

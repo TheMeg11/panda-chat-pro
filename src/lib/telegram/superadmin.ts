@@ -3,6 +3,7 @@ import { db } from "@/db";
 import { files, messages, roomMembers, rooms, telegramBots, telegramLinks, users } from "@/db/schema";
 import {
   allowedChatIds,
+  allowedSenderIds,
   getLastBackupResult,
   getBackupConfig,
   restoreFromBackup,
@@ -20,9 +21,10 @@ import { linkForChat, type TgUpdate } from "./service";
  *   /status /platform /backup /restore /cancel
  *
  * /restore starts a 15-minute window; the operator then sends the .pcbak
- * documents (multi-part archives are reassembled automatically), reviews the
- * summary and confirms. Confirming wipes the current tables and replays the
- * backup inside one transaction.
+ * documents (multi-part archives are reassembled automatically). As soon as
+ * the archive validates, the restore runs automatically — no confirmation
+ * step — wiping the current tables and replaying the backup inside one
+ * transaction.
  */
 
 const RESTORE_WINDOW_MS = 15 * 60_000;
@@ -94,7 +96,7 @@ async function adminHelpText(): Promise<string> {
     "",
     "<b>/platform</b> — data & storage overview, last backup",
     "<b>/backup</b> — create and send a backup right now",
-    "<b>/restore</b> — restore from a backup file you send next",
+    "<b>/restore</b> — restore from a backup file you send next (runs automatically)",
     "<b>/cancel</b> — cancel a pending restore",
     "",
     `⏰ Auto backup: <b>${String(config.hour).padStart(2, "0")}:00</b> (Tehran) · ${config.enabled ? "enabled" : "disabled"}`,
@@ -162,6 +164,9 @@ async function downloadDocument(fileId: string): Promise<Buffer | null> {
   }
 }
 
+/** Backup archives the bot itself sends: `.pcbak` or the encrypted `.pcbak.enc`. */
+const PCBAK_RE = /\.pcbak(\.enc)?$/i;
+
 async function handleDocument(chatId: string, msg: NonNullable<TgUpdate["message"]>) {
   const session = state().restoreSession;
   if (!session || session.chatId !== chatId) {
@@ -172,11 +177,11 @@ async function handleDocument(chatId: string, msg: NonNullable<TgUpdate["message
     return void (await send(chatId, "⌛ The restore window expired. Send /restore to start again."));
   }
   const doc = msg.document;
-  if (!doc || !doc.file_name?.endsWith(".pcbak")) {
+  if (!doc || !PCBAK_RE.test(doc.file_name ?? "")) {
     return void (await send(chatId, "❓ That is not a <code>.pcbak</code> backup file. Send /cancel to abort."));
   }
 
-  const match = /\.part(\d+)of(\d+)\.pcbak$/i.exec(doc.file_name);
+  const match = /\.part(\d+)of(\d+)\.pcbak/i.exec(doc.file_name ?? "");
   if (match) {
     session.total = Number(match[2]);
   } else {
@@ -209,30 +214,21 @@ async function handleDocument(chatId: string, msg: NonNullable<TgUpdate["message
     const counts = payload.counts ?? {};
     state().pending = { chatId, bytes: full, sha256: "", counts, createdAt: payload.createdAt };
     state().restoreSession = null;
+    // Fully automatic: restore immediately after the archive validates.
     await send(
       chatId,
       [
-        "<b>🧾 Backup validated</b>",
+        "🧾 <b>Backup validated</b>",
         "",
         `_created_ ${esc(payload.createdAt)}`,
         `👥 users: <b>${counts.users ?? 0}</b> · 🚪 rooms: <b>${counts.rooms ?? 0}</b> · 👤 members: <b>${counts.roomMembers ?? 0}</b>`,
         `💬 messages: <b>${counts.messages ?? 0}</b> · 📎 files: <b>${counts.files ?? 0}</b> · 🔗 links: <b>${counts.telegramLinks ?? 0}</b>`,
-        `🗄 audit entries: <b>${counts.auditLogs ?? 0}</b> · ⚙️ settings: <b>${counts.platformSettings ?? 0}</b>`,
+        "🗄 audit entries: <b>" + (counts.auditLogs ?? 0) + "</b> · ⚙️ settings: <b>" + (counts.platformSettings ?? 0) + "</b>",
         "",
-        "⚠️ <b>Restoring replaces EVERYTHING currently in the database</b> (users, rooms, messages, files).",
-        "The nightly backup schedule itself is kept.",
+        "♻️ <b>Restoring now…</b> this replaces everything currently in the database.",
       ].join("\n"),
-      {
-        reply_markup: {
-          inline_keyboard: [
-            [
-              { text: "✅ Restore now", callback_data: "rb:confirm" },
-              { text: "✖ Cancel", callback_data: "rb:cancel" },
-            ],
-          ],
-        },
-      },
     );
+    await finalizeRestore(chatId);
   } catch (error) {
     resetRestore();
     await send(chatId, `❌ Invalid backup archive: ${esc((error as Error).message)}`);
@@ -276,7 +272,7 @@ async function finalizeRestore(chatId: string) {
  * False means "not an admin update" — the caller should run the user bot.
  */
 export async function tryHandleSuperadmin(update: TgUpdate): Promise<boolean> {
-  /* restore confirmation buttons */
+  /* restore confirmation buttons (legacy: the flow is automatic now) */
   if (update.callback_query) {
     const cq = update.callback_query;
     if (!cq.data?.startsWith("rb:")) return false;
@@ -298,10 +294,13 @@ export async function tryHandleSuperadmin(update: TgUpdate): Promise<boolean> {
   if (!msg || msg.chat.type !== "private") return false;
   const chatId = String(msg.chat.id);
   if (!(await isAllowed(chatId))) return false; // silent for strangers
+  // Defence in depth: in private chats chat.id == from.id, so also require the
+  // SENDER's Telegram user id to be an allowed admin id.
+  if (!allowedSenderIds().includes(String(msg.from?.id ?? ""))) return false;
 
   // Backup documents: only during a restore window (or an obvious .pcbak file).
   const doc = msg.document;
-  if (doc && (state().restoreSession?.chatId === chatId || doc.file_name?.endsWith(".pcbak"))) {
+  if (doc && (state().restoreSession?.chatId === chatId || PCBAK_RE.test(doc.file_name ?? ""))) {
     await handleDocument(chatId, msg);
     return true;
   }
@@ -336,7 +335,7 @@ export async function tryHandleSuperadmin(update: TgUpdate): Promise<boolean> {
         [
           "♻️ <b>Restore mode</b> — send the <code>.pcbak</code> backup file(s) now.",
           "Multi-part archives: attach every part (any order); they are reassembled automatically.",
-          "You will get a summary and must confirm before anything is changed.",
+          "As soon as the archive validates, the restore runs <b>automatically</b> — no further confirmation.",
           "",
           "Send /cancel to abort.",
         ].join("\n"),
