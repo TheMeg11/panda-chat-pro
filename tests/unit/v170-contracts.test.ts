@@ -56,7 +56,7 @@ describe("v1.6.0 contracts", () => {
   it("health endpoint exposes the deploy version marker", () => {
     const src = readFileSync(new URL("../../src/app/api/health/route.ts", import.meta.url), "utf8");
     expect(src).toContain("ver: APP_VERSION");
-    expect(APP_VERSION).toBe("1.8.0");
+    expect(APP_VERSION).toBe("2.0.0");
   });
 
   it("v1.8.0 mobile UX contracts: unread dot, DM parity, double-tap reply, composer sheet, captcha", () => {

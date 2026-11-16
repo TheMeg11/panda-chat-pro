@@ -364,9 +364,10 @@ export function Modal({
       onSubmit={(e) => e.stopPropagation()}
     >
       <div className="flex min-h-full items-end justify-center p-0 sm:items-center sm:p-6">
-        <button type="button" aria-label={t.common.close} onClick={onClose} className="fixed inset-0 bg-[#1b1f2e]/30 backdrop-blur-[3px] dark:bg-black/50" />
-        <div className="pop-in relative my-auto w-full max-w-lg rounded-t-3xl border border-line bg-surface p-6 shadow-float sm:my-0 sm:rounded-2xl sm:p-7">
-          <div className="mb-5 flex items-start justify-between gap-4">
+        <button type="button" aria-label={t.common.close} onClick={onClose} className="fixed inset-0 bg-[#0b0d24]/55 backdrop-blur-[2px]" />
+        <div className="pop-in relative my-auto flex max-h-[92dvh] w-full max-w-lg flex-col rounded-t-[28px] border border-line bg-surface shadow-float sm:my-0 sm:rounded-[28px]">
+          <div className="mx-auto mt-2.5 h-1 w-10 shrink-0 rounded-full bg-line sm:hidden" aria-hidden="true" />
+          <div className="flex items-start justify-between gap-4 px-6 pb-2 pt-4 sm:pt-5">
             <div>
               <h2 className="text-lg font-extrabold text-ink">{title}</h2>
               {subtitle ? <p className="mt-1 text-sm text-muted">{subtitle}</p> : null}
@@ -375,7 +376,7 @@ export function Modal({
               <X className="size-4" />
             </button>
           </div>
-          {children}
+          <div className="overflow-y-auto overscroll-contain px-6 pb-6">{children}</div>
         </div>
       </div>
     </div>,

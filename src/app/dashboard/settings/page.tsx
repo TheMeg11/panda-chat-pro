@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { KeyRound, Laptop, LogOut, Smartphone, TriangleAlert, UserRound, X } from "lucide-react";
 import { and, desc, eq, gt } from "drizzle-orm";
 import { db } from "@/db";
@@ -6,7 +7,6 @@ import { rooms, sessions } from "@/db/schema";
 import { changePasswordAction, deleteAccountAction, revokeSessionAction, signOutOthersAction, updateProfileAction } from "@/app/actions/account";
 import { Avatar } from "@/components/brand";
 import { InstallAppCard } from "@/components/pwa";
-import { VersionTap } from "@/components/privacy";
 import { AvatarForm } from "@/components/dashboard/avatar-form";
 import { NotificationsCard } from "@/components/dashboard/notifications-card";
 import { TelegramCard } from "@/components/dashboard/telegram-card";
@@ -92,19 +92,19 @@ export default async function AccountPage() {
   ];
 
   return (
-    <div className="mx-auto max-w-3xl px-4 py-8 sm:px-6 sm:py-10">
+    <div className="mx-auto max-w-3xl px-4 py-8 pb-24 sm:px-6 sm:py-10 md:pb-10">
       <div className="fade-up">
         <h1 className="text-3xl font-extrabold text-ink">{t.account.title}</h1>
         <p className="mt-2 text-muted">{t.account.subtitle}</p>
       </div>
 
-      {/* Sticky anchor nav: jumps between the four settings sections. */}
+      {/* Sticky anchor nav: jumps between the settings sections. */}
       <nav aria-label={t.common.account} className="sticky top-0 z-20 -mx-1 mb-4 flex flex-wrap gap-1.5 border-b border-line bg-canvas/95 py-2 backdrop-blur">
         {anchors.map((a) => (
           <a
             key={a.href}
             href={a.href}
-            className="rounded-lg border border-line bg-surface-2 px-2.5 py-1.5 text-xs font-bold text-ink-2 hover:border-line-strong hover:text-ink"
+            className="rounded-full border border-line bg-surface-2 px-3 py-1.5 text-xs font-bold text-ink-2 transition hover:border-line-strong hover:text-ink"
           >
             {a.label}
           </a>
@@ -256,13 +256,13 @@ export default async function AccountPage() {
                 </ActionForm>
               ) : null}
             </div>
-            <ul className="mt-4 divide-y divide-line rounded-xl border border-line">
+            <ul className="mt-4 divide-y divide-line rounded-2xl border border-line">
               {list.map((s) => {
                 const agent = describeAgent(s.userAgent);
                 const Icon = agent.mobile ? Smartphone : Laptop;
                 return (
                   <li key={s.id} className="flex items-center gap-3 px-4 py-3">
-                    <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-surface-3 text-muted">
+                    <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-surface-3 text-muted">
                       <Icon className="size-4" />
                     </span>
                     <div className="min-w-0 flex-1">
@@ -333,8 +333,20 @@ export default async function AccountPage() {
 
         <InstallAppCard />
 
-        {/* Secret entrance to hidden chats lives here (tap the version 5 times). */}
-        <VersionTap rooms={ownedRooms} />
+        {/* ---------------------------------------------------------- */}
+        {/* v2.0 — About the app: the LAST button of Settings. The only  */}
+        {/* entrance to the hidden-chats vault lives at the very bottom  */}
+        {/* of that page (5 taps on the version number).                 */}
+        {/* ---------------------------------------------------------- */}
+        <section className="card flex flex-wrap items-center justify-between gap-3 p-5 sm:p-6">
+          <div className="min-w-0">
+            <p className="text-sm font-bold text-ink">{t.account.aboutShortcut}</p>
+            <p className="mt-0.5 text-xs leading-relaxed text-muted">{t.account.aboutShortcutHint}</p>
+          </div>
+          <Link href="/dashboard/about" className="btn btn-soft btn-sm shrink-0">
+            {t.account.aboutShortcut}
+          </Link>
+        </section>
       </div>
     </div>
   );

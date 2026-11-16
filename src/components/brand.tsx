@@ -26,18 +26,20 @@ export function Logo({
   href = "/",
   className,
   subtitle,
+  onDark = false,
 }: {
   size?: number;
   href?: string | null;
   className?: string;
   subtitle?: string;
+  onDark?: boolean;
 }) {
   const content = (
-    <span className={cn("inline-flex items-center gap-2.5", className)}>
-      <PandaMark size={size} className="shrink-0 drop-shadow-[0_6px_14px_rgba(115,133,244,0.28)]" />
-      <span className="flex flex-col leading-none" dir="ltr">
-        <span className="text-[1.06rem] font-extrabold tracking-tight text-ink">
-          Panda <span className="text-accent-ink">Chat</span>
+    <span className={cn("inline-flex items-center gap-2.5", className)} dir="ltr">
+      <PandaMark size={size} className="shrink-0" />
+      <span className="flex flex-col leading-none">
+        <span className={cn("whitespace-nowrap text-[1.06rem] font-extrabold tracking-tight", onDark ? "text-white" : "text-ink")}>
+          Panda Chat <span className={onDark ? "text-[#9d8cff]" : "text-accent-ink"}>Pro</span>
         </span>
         {subtitle ? <span className="mt-1 text-[0.68rem] font-bold uppercase tracking-[0.14em] text-muted">{subtitle}</span> : null}
       </span>

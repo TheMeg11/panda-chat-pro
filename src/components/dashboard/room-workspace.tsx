@@ -32,7 +32,7 @@ import { Avatar } from "@/components/brand";
 import { ChatView } from "@/components/chat/chat-view";
 import { JoinedRoomInfoPanel } from "@/components/chat/chat-menu";
 import { useI18n } from "@/components/i18n-provider";
-import { ActionButton, ActionForm, CopyButton, LocalTime, PasswordInput, SubmitButton, useNow } from "@/components/ui";
+import { ActionButton, ActionForm, CopyButton, LocalTime, Modal, PasswordInput, SubmitButton, useNow } from "@/components/ui";
 import type { ChatSnapshot } from "@/lib/chat";
 import { formatNumber } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
@@ -71,31 +71,30 @@ type Props = {
   commands: Array<{ command: string; description: string }>;
 };
 
+/**
+ * v2.0 — the owner's room manager is a TABBED MODAL in the theme's style
+ * (pill tabs across the top), opened from the header "manage" button.
+ * Mobile keeps the same modal as a bottom sheet. Everything inside is the
+ * exact same forms/actions as v1.x (share / security / telegram / members /
+ * settings), restyled with the v2.0 tokens.
+ */
 export function RoomWorkspace(props: Props) {
   const { room, snapshot, maxLength, isOwner } = props;
   const { t } = useI18n();
-  const [view, setView] = useState<"chat" | "manage">("chat");
-  // v1.7.0 — tapping the room title opens the read-only info panel (joined
-  // members) instead of the old 5-second hold-to-hide gesture.
   const [infoOpen, setInfoOpen] = useState(false);
+  const [manageOpen, setManageOpen] = useState(false);
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex shrink-0 items-center gap-2 border-b border-line bg-surface px-3 py-2 lg:hidden">
+      <div className="flex shrink-0 items-center gap-2 border-b border-line bg-surface px-3 py-2 md:hidden">
         <Link href="/dashboard" className="btn btn-ghost btn-icon btn-sm" aria-label={t.room.allRooms}>
           <ChevronLeft className="size-4 rtl:rotate-180" />
         </Link>
         {isOwner ? (
-          <div className="seg flex-1">
-            <button type="button" data-active={view === "chat"} className="seg-item flex-1" onClick={() => setView("chat")}>
-              <MessageCircle className="size-4" />
-              {t.room.chatTab}
-            </button>
-            <button type="button" data-active={view === "manage"} className="seg-item flex-1" onClick={() => setView("manage")}>
-              <Settings2 className="size-4" />
-              {t.room.manageTab}
-            </button>
-          </div>
+          <button type="button" className="btn btn-soft btn-sm flex-1" onClick={() => setManageOpen(true)}>
+            <Settings2 className="size-4" />
+            {t.room.manageTab}
+          </button>
         ) : (
           <p className="flex-1 truncate text-sm font-extrabold text-ink" dir="auto">
             {room.name}
@@ -103,7 +102,7 @@ export function RoomWorkspace(props: Props) {
         )}
       </div>
       <div className="flex min-h-0 flex-1">
-        <section className={cn("min-w-0 flex-1 flex-col", view === "chat" || !isOwner ? "flex" : "hidden", "lg:flex")}>
+        <section className="flex min-w-0 flex-1 flex-col">
           {room.isDisabled ? (
             <div className="grid h-full place-items-center p-6">
               <div className="card max-w-md p-8 text-center">
@@ -119,8 +118,16 @@ export function RoomWorkspace(props: Props) {
               initial={snapshot}
               maxLength={maxLength}
               onHeaderOpen={() => setInfoOpen(true)}
+              headerActions={
+                isOwner ? (
+                  <button type="button" className="btn btn-soft btn-sm hidden md:inline-flex" onClick={() => setManageOpen(true)}>
+                    <Settings2 className="size-4" />
+                    {t.room.manageTab}
+                  </button>
+                ) : null
+              }
               headerStart={
-                <Link href="/dashboard" className="btn btn-ghost btn-icon btn-sm -ms-1 hidden lg:inline-flex" aria-label={t.room.allRooms} title={t.room.allRooms}>
+                <Link href="/dashboard" className="btn btn-ghost btn-icon btn-sm -ms-1 hidden md:inline-flex" aria-label={t.room.allRooms} title={t.room.allRooms}>
                   <ChevronLeft className="size-4 rtl:rotate-180" />
                 </Link>
               }
@@ -135,17 +142,7 @@ export function RoomWorkspace(props: Props) {
           description={room.description}
           memberCount={snapshot.room.memberCount}
         />
-        {isOwner ? (
-          <aside
-            className={cn(
-              "w-full shrink-0 flex-col border-line bg-surface lg:w-[400px] lg:border-s xl:w-[430px]",
-              view === "manage" ? "flex" : "hidden",
-              "lg:flex",
-            )}
-          >
-            <RoomManager {...props} />
-          </aside>
-        ) : null}
+        {isOwner ? <RoomManagerModal open={manageOpen} onClose={() => setManageOpen(false)} {...props} /> : null}
       </div>
     </div>
   );
@@ -189,18 +186,19 @@ function Hidden({ roomId, op }: { roomId: string; op: string }) {
   );
 }
 
-function RoomManager({ room, members, telegram, commands }: Props) {
+/** The tabbed manage modal (theme style). */
+function RoomManagerModal({ open, onClose, room, members, telegram, commands }: Props & { open: boolean; onClose: () => void }) {
   const { t, lang } = useI18n();
   const router = useRouter();
   const now = useNow();
   const [tab, setTab] = useState<Tab>("share");
 
   useEffect(() => {
-    if (tab !== "members") return;
+    if (!open || tab !== "members") return;
     router.refresh();
     const id = setInterval(() => router.refresh(), 20_000);
     return () => clearInterval(id);
-  }, [tab, router]);
+  }, [open, tab, router]);
 
   const tabs: Array<[Tab, LucideIcon, string]> = [
     ["share", Link2, t.room.tabShare],
@@ -213,32 +211,33 @@ function RoomManager({ room, members, telegram, commands }: Props) {
   const activeMembers = members.filter((m) => m.status === "active").length;
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
-      <div className="shrink-0 border-b border-line p-3 sm:p-4">
-        <div className="grid grid-cols-5 gap-1 rounded-xl border border-line bg-surface-3 p-1" role="tablist">
-          {tabs.map(([key, Icon, label]) => (
-            <button
-              key={key}
-              type="button"
-              role="tab"
-              aria-selected={tab === key}
-              data-active={tab === key}
-              onClick={() => setTab(key)}
-              className="flex flex-col items-center gap-1 rounded-lg px-1 py-2 text-[11px] font-bold text-muted transition hover:text-ink data-[active=true]:bg-surface data-[active=true]:text-ink data-[active=true]:shadow-soft"
-            >
-              <Icon className="size-4" />
-              <span className="max-w-full truncate">{label}</span>
-            </button>
-          ))}
-        </div>
+    <Modal open={open} onClose={onClose} title={t.room.manageTab} subtitle={room.name}>
+      {/* pill tab bar (theme's Segmented) — resets via key on every open */}
+      <div className="no-scrollbar -mx-1 mb-5 flex gap-1 overflow-x-auto px-1 pb-1" role="tablist">
+        {tabs.map(([key, Icon, label]) => (
+          <button
+            key={key}
+            type="button"
+            role="tab"
+            aria-selected={tab === key}
+            onClick={() => setTab(key)}
+            className={cn(
+              "inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full px-3.5 text-[13px] font-bold transition",
+              tab === key ? "bg-accent text-white shadow-[0_8px_18px_-8px_rgba(91,59,255,0.6)]" : "bg-surface-3 text-muted hover:text-ink",
+            )}
+          >
+            <Icon className="size-4" />
+            {label}
+          </button>
+        ))}
       </div>
 
-      <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-3 sm:p-4">
+      <div className="min-h-0 space-y-4">
         {tab === "share" ? (
-          <section className="card p-5">
+          <section className="rounded-2xl border border-line bg-surface-2/50 p-5">
             <PanelTitle icon={Link2} title={t.room.inviteTitle} />
             <p className="mt-2 text-sm leading-relaxed text-muted">{t.room.inviteText}</p>
-            <div className="mt-4 break-all rounded-xl border border-line bg-surface-2 p-3 font-mono text-xs leading-relaxed text-ink-2" dir="ltr">
+            <div className="mt-4 break-all rounded-xl border border-line bg-surface p-3 font-mono text-xs leading-relaxed text-ink-2" dir="ltr">
               {room.inviteUrl}
             </div>
             <p className="mt-2 flex items-center gap-1.5 text-[11px] font-bold text-mint-ink">
@@ -257,7 +256,7 @@ function RoomManager({ room, members, telegram, commands }: Props) {
 
         {tab === "security" ? (
           <>
-            <section className="card p-5">
+            <section className="rounded-2xl border border-line bg-surface-2/50 p-5">
               <PanelTitle
                 icon={KeyRound}
                 title={t.room.passwordTitle}
@@ -289,7 +288,7 @@ function RoomManager({ room, members, telegram, commands }: Props) {
                 </div>
               ) : null}
             </section>
-            <section className="card p-5">
+            <section className="rounded-2xl border border-line bg-surface-2/50 p-5">
               <PanelTitle
                 icon={Lock}
                 tone="amber"
@@ -320,7 +319,7 @@ function RoomManager({ room, members, telegram, commands }: Props) {
               <div className="notice notice-amber">{t.room.tgNeedPremium}</div>
             ) : null}
             {!telegram.linked ? (
-              <section className="glass card border-white/40 p-5 shadow-glass">
+              <section className="rounded-2xl border border-line bg-surface-2/50 p-5">
                 <PanelTitle icon={Send} tone="sky" title={t.room.tgTitle} />
                 <p className="mt-2 text-sm leading-relaxed text-muted">{t.room.tgIntro}</p>
                 <ol className="mt-4 space-y-2.5">
@@ -340,7 +339,7 @@ function RoomManager({ room, members, telegram, commands }: Props) {
               </section>
             ) : (
               <>
-                <section className="glass card border-white/40 p-5 shadow-glass">
+                <section className="rounded-2xl border border-line bg-surface-2/50 p-5">
                   <div className="flex items-center gap-3">
                     <span className="grid size-11 shrink-0 place-items-center rounded-xl bg-sky-soft text-sky-ink">
                       <Send className="size-5" />
@@ -353,7 +352,7 @@ function RoomManager({ room, members, telegram, commands }: Props) {
                     </div>
                     <span className="badge badge-mint">{t.room.tgStatusActive}</span>
                   </div>
-                  <div className="mt-4 flex items-center justify-between gap-4 rounded-xl border border-line bg-surface-2/60 p-3">
+                  <div className="mt-4 flex items-center justify-between gap-4 rounded-xl border border-line bg-surface p-3">
                     <div>
                       <p className="text-sm font-bold text-ink">{telegram.muted ? t.room.tgRoomMuted : t.room.tgRoomNotifying}</p>
                       <p className="mt-0.5 text-xs leading-relaxed text-muted">{t.room.tgMuteHint}</p>
@@ -364,12 +363,7 @@ function RoomManager({ room, members, telegram, commands }: Props) {
                       className="rounded-full p-0.5"
                       title={t.room.tgMuteHint}
                     >
-                      <span
-                        className={cn(
-                          "relative block h-[1.45rem] w-10 rounded-full transition",
-                          !telegram.muted ? "bg-gradient-to-r from-accent to-accent-2" : "bg-line-strong",
-                        )}
-                      >
+                      <span className={cn("relative block h-[1.45rem] w-10 rounded-full transition", !telegram.muted ? "bg-accent" : "bg-line-strong")}>
                         <span
                           className={cn(
                             "absolute top-[3px] size-[calc(1.45rem-6px)] rounded-full bg-white shadow transition-all",
@@ -391,7 +385,7 @@ function RoomManager({ room, members, telegram, commands }: Props) {
                   </div>
                 </section>
 
-                <section className="card p-5">
+                <section className="rounded-2xl border border-line bg-surface-2/50 p-5">
                   <PanelTitle icon={Terminal} tone="mint" title={t.room.tgCommands} />
                   <ul className="mt-4 space-y-1.5" dir="ltr">
                     {commands.map((c) => (
@@ -408,7 +402,7 @@ function RoomManager({ room, members, telegram, commands }: Props) {
         ) : null}
 
         {tab === "members" ? (
-          <section className="card p-5" data-tutorial="online-status">
+          <section className="rounded-2xl border border-line bg-surface-2/50 p-5" data-tutorial="online-status">
             <PanelTitle icon={Users} tone="mint" title={t.room.membersTitle} aside={<span className="badge badge-neutral">{formatNumber(activeMembers, lang)}</span>} />
             {members.length === 0 ? (
               <p className="mt-4 text-sm leading-relaxed text-muted">{t.room.membersEmpty}</p>
@@ -466,7 +460,7 @@ function RoomManager({ room, members, telegram, commands }: Props) {
 
         {tab === "settings" ? (
           <>
-            <section className="card p-5">
+            <section className="rounded-2xl border border-line bg-surface-2/50 p-5">
               <PanelTitle icon={PencilLine} title={t.room.settingsTitle} />
               <ActionForm action={roomAction} className="mt-4 space-y-4">
                 <Hidden roomId={room.id} op="update" />
@@ -485,7 +479,7 @@ function RoomManager({ room, members, telegram, commands }: Props) {
                 <SubmitButton className="btn btn-primary btn-sm">{t.common.save}</SubmitButton>
               </ActionForm>
             </section>
-            <section className="card p-5" data-tutorial="rooms">
+            <section className="rounded-2xl border border-line bg-surface-2/50 p-5" data-tutorial="rooms">
               <PanelTitle icon={Timer} title={t.selfdestruct.title} />
               <p className="mt-1 text-xs leading-relaxed text-muted">{t.selfdestruct.subtitle}</p>
               <ActionForm action={setRoomTtlAction} showMessage={false} className="mt-4 flex items-center gap-2">
@@ -504,7 +498,7 @@ function RoomManager({ room, members, telegram, commands }: Props) {
                 <SubmitButton className="btn btn-primary btn-sm h-10">{t.common.save}</SubmitButton>
               </ActionForm>
             </section>
-            <section className="card border-rose/70 p-5">
+            <section className="rounded-2xl border border-rose/70 bg-rose-soft/30 p-5">
               <PanelTitle icon={TriangleAlert} tone="rose" title={t.room.dangerTitle} />
               <div className="mt-4 space-y-4">
                 <div className="flex items-center justify-between gap-3">
@@ -530,6 +524,6 @@ function RoomManager({ room, members, telegram, commands }: Props) {
           </>
         ) : null}
       </div>
-    </div>
+    </Modal>
   );
 }

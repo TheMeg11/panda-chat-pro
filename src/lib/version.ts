@@ -1,3 +1,3 @@
 /** Shown in Settings and used as the hidden-chats secret tap target. */
-export const APP_VERSION = "1.8.0";
+export const APP_VERSION = "2.0.0";
 export const APP_NAME = "Panda Chat";

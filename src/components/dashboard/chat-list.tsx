@@ -5,25 +5,18 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   Ban,
-  Bell,
-  Bot,
-  Info,
   KeyRound,
-  LogOut,
-  Menu,
   MessageCirclePlus,
   Search,
-  ShieldCheck,
-  UserRound,
-  UserRoundSearch,
+  SquarePen,
   X,
 } from "lucide-react";
-import { logoutAction } from "@/app/actions/auth";
 import { startDmAction } from "@/app/actions/dm";
 import { Avatar, PandaMark } from "@/components/brand";
 import { useI18n } from "@/components/i18n-provider";
 import { CreateRoomButton } from "@/components/dashboard/create-room";
-import { ActionForm, LangToggle, LocalTime, SubmitButton, ThemeToggle } from "@/components/ui";
+import { BottomNav, SidebarHeader } from "@/components/dashboard/nav";
+import { ActionForm, LocalTime, SubmitButton } from "@/components/ui";
 import type { DashboardChat } from "@/lib/rooms";
 import { cn } from "@/lib/utils";
 
@@ -48,30 +41,28 @@ type FoundUser = { username: string; displayName: string };
 const USERNAME_RE = /^[a-zA-Z0-9._]{2,32}$/;
 
 /**
- * Telegram-style chat list: menu + search on top, the conversation list below,
- * a floating "new chat" button. No counters, no stats, no greeting — anything
- * that could hint at hidden chats simply does not exist on this page.
- *
- * The list itself is fetched CLIENT-SIDE from /api/chats (no-store) so hidden
- * conversations never appear in the server-rendered HTML.
+ * v2.0 theme chat list — one unified list (rooms + DMs) inside the sidebar,
+ * with a calm greeting header, pill search and a "new chat" pencil button.
+ * No counters, no stats — anything that could hint at hidden chats does not
+ * exist on this page. The list is fetched CLIENT-SIDE from /api/chats
+ * (no-store) so hidden conversations never appear in the server-rendered HTML.
  */
 export function ChatListPanel({ chats: initialChats, user, roomLimit, totalRooms: initialTotal }: Props) {
   const { t } = useI18n();
   const pathname = usePathname();
   const [query, setQuery] = useState("");
-  const [menuOpen, setMenuOpen] = useState(false);
   const [searched, setSearched] = useState<{ q: string; user: FoundUser | null } | null>(null);
   const [chats, setChats] = useState<DashboardChat[]>(initialChats);
   const [totalRooms, setTotalRooms] = useState(initialTotal);
   const [loaded, setLoaded] = useState(false);
+  const [unread, setUnread] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const tickRef = useRef(0);
 
   // §4.4: fetch the conversation list client-side, never from SSR HTML.
-  // v1.6.0 live sync: the list now POLLS while the dashboard is open — new
-  // messages refresh previews/unread dots, joined rooms and incoming DMs
-  // appear without any navigation, and every entry into the site syncs
-  // immediately (mount + tab-visible + window focus).
+  // Live sync: the list POLLS while the dashboard is open — new messages
+  // refresh previews/unread dots, joined rooms and incoming DMs appear
+  // without any navigation, and every entry into the site syncs immediately.
   useEffect(() => {
     let cancelled = false;
     let busy = false;
@@ -85,6 +76,7 @@ export function ChatListPanel({ chats: initialChats, user, roomLimit, totalRooms
         if (cancelled) return;
         setChats(data.chats ?? []);
         setTotalRooms(data.totalRooms ?? 0);
+        setUnread((data.chats ?? []).filter((c) => c.hasUnread).length);
       } catch {
         /* offline — keep whatever we have */
       } finally {
@@ -162,27 +154,44 @@ export function ChatListPanel({ chats: initialChats, user, roomLimit, totalRooms
   };
 
   return (
-    <div className="relative flex h-full min-h-0 flex-col">
-      {/* Top bar: menu + search (Telegram-like) */}
-      <div className="relative flex shrink-0 items-center gap-2 border-b border-line bg-surface px-3 py-2.5" data-tutorial="user-search">
-        <button
-          type="button"
-          className="btn btn-ghost btn-icon"
-          onClick={() => setMenuOpen((v) => !v)}
-          aria-label={t.common.menu}
-          aria-expanded={menuOpen}
-        >
-          <Menu className="size-5" />
-        </button>
-        <div className="relative min-w-0 flex-1">
-          <Search className="pointer-events-none absolute inset-y-0 start-3 my-auto size-4 text-faint" />
+    <div className="relative flex h-full min-h-0 flex-col bg-surface">
+      {/* deep-navy header (theme's SidebarHeader) — brand + greeting */}
+      <SidebarHeader />
+      <div className="bg-side px-3 pb-4 pt-1 text-white md:px-4 lg:px-5" data-tutorial="user-search">
+        <div className="flex items-center gap-2.5">
+          <Link href="/dashboard/profile" className="shrink-0 rounded-full" aria-label={t.common.profile}>
+            <Avatar
+              name={user.displayName}
+              size={38}
+              src={user.avatarVersion ? `/api/users/${user.id}/avatar?v=${user.avatarVersion}` : undefined}
+            />
+          </Link>
+          <div className="min-w-0 flex-1 leading-tight">
+            <p className="truncate text-[15px] font-bold text-white">{user.displayName}</p>
+            <p className="truncate text-[11px] text-white/60" dir="ltr">
+              @{user.username}
+            </p>
+          </div>
+          <Link
+            href="/dashboard/settings"
+            aria-label={t.common.account}
+            title={t.common.account}
+            className="grid size-9 shrink-0 place-items-center rounded-full text-white/75 transition hover:bg-white/10 hover:text-white"
+          >
+            <SquarePen className="size-[18px]" />
+          </Link>
+        </div>
+
+        {/* pill search */}
+        <div className="relative mt-3">
+          <Search className="pointer-events-none absolute inset-y-0 start-3.5 my-auto size-4 text-white/50" />
           <input
             ref={inputRef}
             type="search"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder={t.dm.searchPlaceholder}
-            className="input h-10 rounded-full bg-surface-2 ps-9"
+            className="h-10 w-full rounded-full border border-white/10 bg-white/10 ps-10 pe-9 text-sm text-white placeholder:text-white/45 outline-none transition focus:border-white/25 focus:bg-white/15"
             aria-label={t.dm.searchPlaceholder}
           />
           {query ? (
@@ -192,113 +201,23 @@ export function ChatListPanel({ chats: initialChats, user, roomLimit, totalRooms
                 setQuery("");
                 inputRef.current?.focus();
               }}
-              className="absolute inset-y-0 end-2 my-auto grid size-7 place-items-center rounded-full text-faint hover:text-ink"
+              className="absolute inset-y-0 end-2 my-auto grid size-7 place-items-center rounded-full text-white/60 hover:text-white"
               aria-label={t.common.close}
             >
               <X className="size-4" />
             </button>
           ) : null}
         </div>
-
-        {menuOpen ? (
-          <>
-            <button type="button" className="fixed inset-0 z-30 cursor-default" onClick={() => setMenuOpen(false)} aria-hidden="true" tabIndex={-1} />
-            <div className="pop-in absolute start-3 top-[3.4rem] z-40 w-64 overflow-hidden rounded-2xl border border-line bg-surface p-2 shadow-float">
-              <div className="flex items-center gap-3 px-2 py-2">
-                <Avatar
-                  name={user.displayName}
-                  size={38}
-                  src={user.avatarVersion ? `/api/users/${user.id}/avatar?v=${user.avatarVersion}` : undefined}
-                />
-                <div className="min-w-0 leading-tight">
-                  <p className="truncate text-sm font-bold text-ink">{user.displayName}</p>
-                  <p className="text-[11px] text-muted" dir="ltr">
-                    @{user.username}
-                  </p>
-                  {user.bio ? (
-                    <p className="mt-0.5 truncate text-xs text-muted" dir="auto">
-                      {user.bio}
-                    </p>
-                  ) : null}
-                </div>
-              </div>
-              <div className="my-1 border-t border-line" />
-              <nav className="flex flex-col">
-                <Link
-                  href="/dashboard/settings#account"
-                  onClick={() => setMenuOpen(false)}
-                  className="flex items-center gap-2.5 rounded-xl px-3 py-2 text-sm font-semibold text-ink transition hover:bg-surface-3"
-                >
-                  <UserRound className="size-4" />
-                  {t.common.account}
-                </Link>
-                <Link
-                  href="/dashboard/settings#notifications"
-                  onClick={() => setMenuOpen(false)}
-                  className="flex items-center gap-2.5 rounded-xl px-3 py-2 text-sm font-semibold text-ink transition hover:bg-surface-3"
-                >
-                  <Bell className="size-4" />
-                  {t.common.notifications}
-                </Link>
-                <Link
-                  href="/dashboard/settings#security"
-                  onClick={() => setMenuOpen(false)}
-                  className="flex items-center gap-2.5 rounded-xl px-3 py-2 text-sm font-semibold text-ink transition hover:bg-surface-3"
-                >
-                  <ShieldCheck className="size-4" />
-                  {t.common.security}
-                </Link>
-                <Link
-                  href="/dashboard/settings#telegram"
-                  onClick={() => setMenuOpen(false)}
-                  className="flex items-center gap-2.5 rounded-xl px-3 py-2 text-sm font-semibold text-ink transition hover:bg-surface-3"
-                >
-                  <Bot className="size-4" />
-                  {t.common.telegramBotSettings}
-                </Link>
-                <Link
-                  href="/dashboard/about"
-                  onClick={() => setMenuOpen(false)}
-                  className="flex items-center gap-2.5 rounded-xl px-3 py-2 text-sm font-semibold text-ink transition hover:bg-surface-3"
-                >
-                  <Info className="size-4" />
-                  {t.common.aboutSite}
-                </Link>
-              </nav>
-              <div className="my-1 border-t border-line" />
-              <div className="flex items-center justify-between px-3 py-1.5 text-sm font-semibold text-ink">
-                <span className="flex items-center gap-2.5">
-                  <ThemeToggle className="" />
-                  {t.common.toggleTheme}
-                </span>
-                <LangToggle compact />
-              </div>
-              <div className="my-1 border-t border-line" />
-              <form action={logoutAction}>
-                <button
-                  type="submit"
-                  className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-sm font-semibold text-rose-ink transition hover:bg-rose-soft"
-                >
-                  <LogOut className="size-4 rtl:-scale-x-100" />
-                  {t.common.logout}
-                </button>
-              </form>
-            </div>
-          </>
-        ) : null}
       </div>
 
       {/* Exact username search result */}
       {looksLikeUsername && !exactMatchOnList ? (
         <div className="shrink-0 border-b border-line px-3 py-3">
-          <p className="mb-2 flex items-center gap-1.5 text-[11px] font-bold text-faint">
-            <UserRoundSearch className="size-3.5" />
-            {t.dm.exactSearch}
-          </p>
+          <p className="mb-2 px-1 text-[11px] font-bold text-faint">{t.dm.exactSearch}</p>
           {found === undefined ? null : found === null ? (
             <p className="px-1 text-xs text-muted">{t.dm.userNotFound}</p>
           ) : (
-            <div className="flex items-center gap-3 rounded-xl bg-surface-2 px-3 py-2.5">
+            <div className="flex items-center gap-3 rounded-2xl bg-surface-2 px-3 py-2.5">
               <Avatar name={found.displayName} size={40} />
               <div className="min-w-0 flex-1 leading-tight">
                 <p className="truncate text-sm font-bold text-ink">{found.displayName}</p>
@@ -318,13 +237,13 @@ export function ChatListPanel({ chats: initialChats, user, roomLimit, totalRooms
         </div>
       ) : null}
 
-      {/* Conversation list */}
-      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2 pb-24 pt-1.5" data-tutorial="chat-list">
+      {/* Conversation list — unified, theme-style rows */}
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2 pb-4 pt-1.5" data-tutorial="chat-list">
         {!loaded ? (
           <div className="mt-8 flex flex-col gap-2 px-2" aria-hidden="true">
             {[0, 1, 2, 3].map((i) => (
-              <div key={i} className="flex items-center gap-3 rounded-xl px-2.5 py-2.5">
-                <span className="size-11 shrink-0 animate-pulse rounded-xl bg-surface-2" />
+              <div key={i} className="flex items-center gap-3 rounded-2xl px-2.5 py-2.5">
+                <span className="size-11 shrink-0 animate-pulse rounded-full bg-surface-2" />
                 <span className="flex-1 space-y-1.5">
                   <span className="block h-3 w-1/2 animate-pulse rounded bg-surface-2" />
                   <span className="block h-2.5 w-3/4 animate-pulse rounded bg-surface-2" />
@@ -346,8 +265,7 @@ export function ChatListPanel({ chats: initialChats, user, roomLimit, totalRooms
               const active = pathname === `/dashboard/rooms/${chat.id}`;
               return (
                 <li key={chat.id} className="relative">
-                  {/* v1.8.0 — red unread dot (Telegram-style): chats with
-                      unread messages are visually flagged at a glance. */}
+                  {/* red unread dot (Telegram-style) */}
                   <span
                     aria-hidden="true"
                     className={cn(
@@ -355,15 +273,12 @@ export function ChatListPanel({ chats: initialChats, user, roomLimit, totalRooms
                       chat.hasUnread ? "block" : "hidden",
                     )}
                   />
-                  {/* v1.7.0 — plain Telegram-style cards: the per-card ⋯ menu and
-                      the 5-second hold-to-hide are gone; hiding lives in the
-                      conversation's profile-panel ☰ menu. */}
                   <Link
                     href={`/dashboard/rooms/${chat.id}`}
                     data-room-id={chat.id}
                     className={cn(
-                      "flex items-center gap-3 rounded-xl px-2.5 py-2.5 transition",
-                      active ? "bg-accent-soft" : "hover:bg-surface-2",
+                      "flex min-h-[72px] items-center gap-3 rounded-2xl px-2.5 py-2.5 transition",
+                      active ? "bg-accent-soft" : "hover:bg-surface-2 active:bg-surface-2",
                     )}
                   >
                     <Avatar name={chat.name} size={46} square={chat.type !== "dm"} />
@@ -393,7 +308,7 @@ export function ChatListPanel({ chats: initialChats, user, roomLimit, totalRooms
         )}
       </div>
 
-      {/* Floating "new chat" button */}
+      {/* Floating "new chat" button (theme style — brand circle, bottom end) */}
       <div className="pointer-events-none absolute bottom-5 end-5 z-20" data-tutorial="new-chat">
         <CreateRoomButton
           fab
@@ -402,6 +317,9 @@ export function ChatListPanel({ chats: initialChats, user, roomLimit, totalRooms
           className="pointer-events-auto size-14 justify-center rounded-full shadow-float"
         />
       </div>
+
+      {/* Mobile bottom nav (chats / settings / profile) — no hidden entry */}
+      <BottomNav unread={unread} />
     </div>
   );
 }

@@ -51,31 +51,36 @@ export default async function LandingPage() {
   const primaryLabel = user ? t.common.openDashboard : L.ctaPrimary;
 
   return (
-    <div className="min-h-dvh">
+    <div className="relative isolate min-h-dvh overflow-x-clip">
       {settings.announcement ? (
-        <div className="border-b border-line bg-accent-soft px-5 py-2.5 text-center text-sm font-semibold text-accent-ink">
+        <div className="relative z-50 border-b border-line bg-accent-soft px-5 py-2.5 text-center text-sm font-semibold text-accent-ink">
           <Megaphone className="me-2 inline size-4 align-[-3px]" />
           {settings.announcement}
         </div>
       ) : null}
 
+      {/* soft lavender glow behind header + hero, fading out smoothly */}
+      <div
+        className="hero-glow pointer-events-none absolute inset-x-0 top-0 -z-10 h-[980px] [mask-image:linear-gradient(to_bottom,#000_55%,transparent)]"
+        aria-hidden="true"
+      />
+
       {/* Navigation */}
-      <header className="glass sticky top-0 z-40 border-b border-line/70">
-        <div className="mx-auto flex h-16 max-w-6xl items-center justify-between gap-4 px-5">
-          <Logo />
-          <nav className="hidden items-center gap-1 md:flex" aria-label="Primary">
+      <header className="glass sticky top-0 z-40 border-b border-transparent">
+        <div className="mx-auto flex h-[68px] max-w-7xl items-center gap-3 px-5 sm:h-[76px] sm:px-8">
+          <Logo href="/" size={38} className="me-auto" />
+          <nav className="hidden items-center gap-9 md:flex" aria-label="Primary">
             {nav.map(([href, label]) => (
-              <a key={href} href={href} className="rounded-lg px-3 py-2 text-sm font-semibold text-ink-2 transition hover:bg-surface-3 hover:text-ink">
+              <a key={href} href={href} className="text-sm font-semibold text-ink-2 transition hover:text-accent-ink">
                 {label}
               </a>
             ))}
           </nav>
-          <div className="flex items-center gap-0.5">
-            <LangToggle compact className="sm:hidden" />
-            <LangToggle className="hidden sm:inline-flex" />
+          <div className="flex items-center gap-1.5 md:ms-6 sm:gap-2.5">
+            <LangToggle compact />
             <ThemeToggle />
             {user ? (
-              <Link href="/dashboard" className="btn btn-primary ms-1.5">
+              <Link href="/dashboard" className="btn btn-primary ms-1.5 h-10 hidden px-6 sm:inline-flex">
                 {t.common.openDashboard}
               </Link>
             ) : (
@@ -83,7 +88,7 @@ export default async function LandingPage() {
                 <Link href="/login" className="btn btn-ghost hidden sm:inline-flex">
                   {t.common.login}
                 </Link>
-                <Link href="/register" className="btn btn-primary ms-1.5">
+                <Link href="/register" className="btn btn-primary ms-1.5 h-10 px-6">
                   {t.common.signup}
                 </Link>
               </>
@@ -93,10 +98,8 @@ export default async function LandingPage() {
       </header>
 
       {/* Hero */}
-      <section className="relative overflow-hidden">
-        <div className="hero-glow pointer-events-none absolute inset-0" aria-hidden="true" />
-        <div className="grid-fade pointer-events-none absolute inset-0 opacity-70" aria-hidden="true" />
-        <div className="relative mx-auto grid max-w-6xl items-center gap-16 px-5 pb-24 pt-14 sm:pt-20 lg:grid-cols-[1.02fr_1fr] lg:gap-10 lg:pb-32">
+      <section className="relative">
+        <div className="mx-auto grid max-w-7xl items-center gap-16 px-5 pb-24 pt-14 sm:pt-20 lg:grid-cols-[1.05fr_1fr] lg:gap-10 lg:pb-32">
           <div className="fade-up">
             <span className="inline-flex items-center gap-2 rounded-full border border-line bg-surface/80 px-3 py-1.5 text-xs font-bold text-ink-2 shadow-soft">
               <span className="live-dot" aria-hidden="true" />
@@ -138,7 +141,7 @@ export default async function LandingPage() {
 
       {/* Features */}
       <section id="features" className="scroll-mt-20 py-20 sm:py-28">
-        <div className="mx-auto max-w-6xl px-5">
+        <div className="mx-auto max-w-7xl px-5">
           <SectionHeading lang={lang} kicker={L.featuresKicker} title={L.featuresTitle} subtitle={L.featuresSubtitle} />
           <div className="mt-14 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {features.map((f) => (
@@ -155,8 +158,8 @@ export default async function LandingPage() {
       </section>
 
       {/* How it works */}
-      <section id="how" className="scroll-mt-20 border-y border-line bg-surface/60 py-20 sm:py-28">
-        <div className="mx-auto max-w-6xl px-5">
+      <section id="how" className="scroll-mt-20 border-y border-line bg-surface-2/50 py-20 sm:py-28">
+        <div className="mx-auto max-w-7xl px-5">
           <SectionHeading lang={lang} kicker={L.howKicker} title={L.howTitle} subtitle={L.howSubtitle} />
           <ol className="relative mt-16 grid gap-10 md:grid-cols-3 md:gap-6">
             <div className="absolute inset-x-[16%] top-7 hidden border-t-2 border-dashed border-line-strong md:block" aria-hidden="true" />
@@ -166,7 +169,7 @@ export default async function LandingPage() {
               [L.s3t, L.s3d],
             ].map(([title, desc], i) => (
               <li key={title} className="relative text-center">
-                <span className="relative mx-auto grid size-14 place-items-center rounded-2xl bg-gradient-to-br from-accent to-accent-2 text-xl font-extrabold text-[var(--on-accent)] shadow-card ring-8 ring-canvas">
+                <span className="relative mx-auto grid size-14 place-items-center rounded-full bg-accent text-xl font-extrabold text-on-accent shadow-[0_10px_24px_-8px_rgba(91,59,255,0.6)] ring-8 ring-canvas">
                   {(i + 1).toLocaleString(lang === "fa" ? "fa-IR" : "en-US")}
                 </span>
                 <h3 className="mt-6 text-lg font-extrabold text-ink">{title}</h3>
@@ -179,7 +182,7 @@ export default async function LandingPage() {
 
       {/* Telegram */}
       <section id="telegram" className="scroll-mt-20 py-20 sm:py-28">
-        <div className="mx-auto grid max-w-6xl items-center gap-16 px-5 lg:grid-cols-2">
+        <div className="mx-auto grid max-w-7xl items-center gap-16 px-5 lg:grid-cols-2">
           <div>
             <SectionHeading lang={lang} kicker={L.tgKicker} title={L.tgTitle} subtitle={L.tgSubtitle} center={false} />
             <ul className="mt-8 space-y-3.5">
@@ -201,7 +204,7 @@ export default async function LandingPage() {
             <p className="mt-9 text-xs font-extrabold uppercase tracking-[0.14em] text-muted">{L.tgCommandsTitle}</p>
             <div className="mt-3 flex flex-wrap gap-2" dir="ltr">
               {["/status", "/link", "/newlink", "/lock", "/kick", "/password", "/recent", "/mute"].map((c) => (
-                <code key={c} className="rounded-lg border border-line bg-surface px-2.5 py-1 font-mono text-xs font-bold text-accent-ink shadow-soft">
+                <code key={c} className="rounded-full border border-line bg-surface px-2.5 py-1 font-mono text-xs font-bold text-accent-ink shadow-soft">
                   {c}
                 </code>
               ))}
@@ -213,7 +216,7 @@ export default async function LandingPage() {
 
       {/* Security */}
       <section id="security" className="scroll-mt-20 pb-20 sm:pb-28">
-        <div className="mx-auto max-w-6xl px-5">
+        <div className="mx-auto max-w-7xl px-5">
           <div className="rounded-[1.75rem] border border-line bg-gradient-to-br from-surface via-surface to-lavender-soft p-8 shadow-soft sm:p-12">
             <SectionHeading lang={lang} kicker={L.secKicker} title={L.secTitle} subtitle={L.secSubtitle} center={false} />
             <div className="mt-10 grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
@@ -240,21 +243,24 @@ export default async function LandingPage() {
 
       {/* CTA */}
       <section className="pb-24">
-        <div className="mx-auto max-w-6xl px-5">
-          <div className="relative overflow-hidden rounded-[1.75rem] border border-line bg-gradient-to-br from-accent-soft via-lavender-soft to-sky-soft px-6 py-16 text-center sm:px-16">
-            <div className="pointer-events-none absolute -start-16 -top-20 size-72 rounded-full bg-lavender/70 blur-3xl" aria-hidden="true" />
-            <div className="pointer-events-none absolute -bottom-24 -end-10 size-72 rounded-full bg-sky/70 blur-3xl" aria-hidden="true" />
+        <div className="mx-auto max-w-7xl px-5">
+          <div className="relative overflow-hidden rounded-[1.75rem] bg-side px-6 py-16 text-center text-white shadow-float sm:px-16">
+            <div className="pointer-events-none absolute -start-16 -top-20 size-72 rounded-full bg-brand/35 blur-3xl" aria-hidden="true" />
+            <div className="pointer-events-none absolute -bottom-24 -end-10 size-72 rounded-full bg-accent-2/25 blur-3xl" aria-hidden="true" />
             <div className="relative">
-              <PandaMark size={60} className="float-slow mx-auto" />
-              <h2 className="mx-auto mt-7 max-w-2xl text-3xl font-extrabold text-ink sm:text-4xl">{L.ctaTitle}</h2>
-              <p className="mx-auto mt-4 max-w-lg text-lg text-ink-2">{L.ctaSubtitle}</p>
+              <PandaMark size={64} className="float-slow mx-auto" />
+              <h2 className="mx-auto mt-7 max-w-2xl text-3xl font-extrabold sm:text-4xl">{L.ctaTitle}</h2>
+              <p className="mx-auto mt-4 max-w-lg text-lg text-white/75">{L.ctaSubtitle}</p>
               <div className="mt-9 flex flex-wrap justify-center gap-3">
                 <Link href={primaryHref} className="btn btn-primary btn-lg">
                   {user ? t.common.openDashboard : L.ctaButton}
                   <ArrowRight className="size-4 rtl:rotate-180" />
                 </Link>
                 {!user ? (
-                  <Link href="/login" className="btn btn-secondary btn-lg">
+                  <Link
+                    href="/login"
+                    className="btn btn-lg h-12 border border-white/20 bg-white/10 px-7 text-base font-semibold text-white backdrop-blur transition hover:bg-white/15"
+                  >
                     {t.common.login}
                   </Link>
                 ) : null}
@@ -266,7 +272,7 @@ export default async function LandingPage() {
 
       {/* Footer */}
       <footer className="border-t border-line bg-surface/60">
-        <div className="mx-auto grid max-w-6xl gap-10 px-5 py-14 sm:grid-cols-[1.6fr_1fr_1fr]">
+        <div className="mx-auto grid max-w-7xl gap-10 px-5 py-14 sm:grid-cols-[1.6fr_1fr_1fr]">
           <div>
             <Logo />
             <p className="mt-4 max-w-xs text-sm leading-relaxed text-muted">{L.footerTagline}</p>
@@ -310,10 +316,8 @@ export default async function LandingPage() {
           </div>
         </div>
         <div className="border-t border-line">
-          <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-3 px-5 py-6 text-xs text-faint sm:flex-row">
-            <p>
-              © 2026 Panda Chat. {L.footerRights}
-            </p>
+          <div className="mx-auto flex max-w-7xl flex-col items-center justify-between gap-3 px-5 py-6 text-xs text-faint sm:flex-row">
+            <p>© 2026 Panda Chat. {L.footerRights}</p>
             <div className="flex items-center gap-0.5">
               <LangToggle compact />
               <ThemeToggle />
@@ -362,7 +366,7 @@ function HeroPreview({ t }: { t: Dict }) {
             <span className="size-2.5 rounded-full bg-[#f7d99c]" />
             <span className="size-2.5 rounded-full bg-[#b4e3cc]" />
           </div>
-          <div className="flex min-w-0 flex-1 items-center gap-2 rounded-lg border border-line bg-surface px-3 py-1.5 text-[11px] text-muted" dir="ltr">
+          <div className="flex min-w-0 flex-1 items-center gap-2 rounded-full border border-line bg-surface px-3 py-1.5 text-[11px] text-muted" dir="ltr">
             <Lock className="size-3 shrink-0 text-mint-ink" />
             <span className="truncate">
               pandachat.app/r/<span className="text-ink-2">x7Gk2pQ9vL4mTz8sWb1nRc6yHd3fJa5eK0uViOq2Ls</span>
@@ -396,7 +400,7 @@ function HeroPreview({ t }: { t: Dict }) {
           <div className="flex justify-end">
             <div className="bubble bubble-out max-w-[80%] text-[13px]">
               {L.previewMsg2}
-              <span className="ms-2 text-[10px] opacity-60">10:25</span>
+              <span className="ms-2 text-[10px] opacity-70">10:25</span>
             </div>
           </div>
           <div className="flex items-end gap-2">
@@ -411,8 +415,8 @@ function HeroPreview({ t }: { t: Dict }) {
           </div>
         </div>
         <div className="flex items-center gap-2 border-t border-line px-3 py-3">
-          <div className="flex h-10 flex-1 items-center rounded-xl border border-line-strong bg-surface px-3.5 text-sm text-faint">{L.previewComposer}</div>
-          <span className="btn btn-primary btn-icon rounded-xl" aria-hidden="true">
+          <div className="flex h-10 flex-1 items-center rounded-full border border-line bg-surface px-3.5 text-sm text-faint">{L.previewComposer}</div>
+          <span className="btn btn-primary btn-icon rounded-full" aria-hidden="true">
             <SendHorizontal className="size-4 rtl:-scale-x-100" />
           </span>
         </div>
@@ -476,17 +480,15 @@ function TelegramPreview({ t }: { t: Dict }) {
             </div>
           </div>
           <div className="flex justify-end">
-            <div className="max-w-[80%] rounded-2xl rounded-ee-md bg-gradient-to-br from-[#d9efff] to-[#e6e2ff] px-3.5 py-2.5 text-[13px] text-[#263043] dark:from-[#26405a] dark:to-[#363262] dark:text-[#eef0ff]">
-              <span className="mb-1 block border-s-2 border-sky-ink ps-2 text-[11px] opacity-75" dir="auto">
+            <div className="max-w-[80%] rounded-2xl rounded-ee-md bg-accent-soft px-3.5 py-2.5 text-[13px] text-ink">
+              <span className="mb-1 block border-s-2 border-accent-ink ps-2 text-[11px] opacity-75" dir="auto">
                 {L.tgChatIncomingText}
               </span>
               <span dir="auto">{L.tgChatReply}</span>
             </div>
           </div>
           <div className="flex justify-end" dir="ltr">
-            <span className="rounded-2xl rounded-ee-md bg-gradient-to-br from-[#d9efff] to-[#e6e2ff] px-3.5 py-2 font-mono text-[13px] font-bold text-[#3a56b8] dark:from-[#26405a] dark:to-[#363262] dark:text-[#aeb8ff]">
-              /lock
-            </span>
+            <span className="rounded-full bg-accent-soft px-3.5 py-2 font-mono text-[13px] font-bold text-accent-ink">/lock</span>
           </div>
           <div className="max-w-[88%] rounded-2xl rounded-es-md border border-line bg-surface px-3.5 py-2.5 text-[13px] text-ink-2 shadow-soft" dir="ltr">
             🔒 Room locked. Members can read, only you can send messages.

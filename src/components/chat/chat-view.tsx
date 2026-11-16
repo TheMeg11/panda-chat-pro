@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import {
   ArrowDown,
   Check,
+  ChevronDown,
+  ChevronUp,
   Copy,
   Download,
   File as FileIcon,
@@ -17,6 +19,7 @@ import {
   Music,
   Paperclip,
   Plus,
+  Search,
   Smile,
   Timer,
   Unlock,
@@ -94,6 +97,24 @@ function linkify(text: string): ReactNode[] {
   );
 }
 
+/** v2.0 — highlights the active in-chat search query inside a message body. */
+function highlight(text: string, query: string, active: boolean): ReactNode {
+  const q = query.trim().toLowerCase();
+  if (q.length < 2) return text;
+  const lower = text.toLowerCase();
+  const at = lower.indexOf(q);
+  if (at < 0) return text;
+  return (
+    <>
+      {text.slice(0, at)}
+      <mark className={`rounded px-0.5 text-inherit ${active ? "bg-amber-300 text-[#171a3c]" : "bg-amber-200/80 text-[#171a3c]"}`}>
+        {text.slice(at, at + q.length)}
+      </mark>
+      {text.slice(at + q.length)}
+    </>
+  );
+}
+
 export function ChatView({
   endpoint,
   initial,
@@ -153,6 +174,56 @@ export function ChatView({
   /* ---- Self-destruct (§4.2) & watermark (§4.11) ---- */
   const [ttlChoice, setTtlChoice] = useState<string>("default");
   const watermark = useLocalFlag("pc-watermark");
+
+  /* ---- v2.0 in-chat search: query, matched ids, active match, open state ---- */
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [matchIndex, setMatchIndex] = useState(0);
+
+  /** The plain, searchable text of a message (decrypted payload when E2EE). */
+  const searchableText = useCallback(
+    (m: ChatMessage): string => {
+      if (m.authorRole === "system") return "";
+      if (m.encrypted) {
+        const dec = plainBodies.get(m.id);
+        if (dec === undefined) return "";
+        try {
+          const parsed = JSON.parse(dec) as { text?: string; file?: { name?: string } };
+          return `${parsed.text ?? ""} ${parsed.file?.name ?? ""}`.trim();
+        } catch {
+          return dec;
+        }
+      }
+      return `${m.body ?? ""} ${m.file?.name ?? ""}`.trim();
+    },
+    [plainBodies],
+  );
+
+  const matches = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (q.length < 2) return [] as number[];
+    return messages.filter((m) => searchableText(m).toLowerCase().includes(q)).map((m) => m.id);
+  }, [messages, searchQuery, searchableText]);
+
+  /** True when THIS message id is the currently focused search result (index auto-clamped). */
+  const activeMatch = searchOpen && matches.length > 0 ? matches[Math.min(matchIndex, matches.length - 1)] : null;
+
+  const jumpMatch = (dir: 1 | -1) => {
+    if (matches.length === 0) return;
+    const next = (matchIndex + dir + matches.length) % matches.length;
+    setMatchIndex(next);
+    const el = document.getElementById(`msg-${matches[next]}`);
+    el?.scrollIntoView({ behavior: "smooth", block: "center" });
+  };
+  const runSearch = (value: string) => {
+    setSearchQuery(value);
+    setMatchIndex(0);
+    const q = value.trim().toLowerCase();
+    if (q.length < 2) return;
+    const first = messages.find((m) => searchableText(m).toLowerCase().includes(q));
+    if (first) document.getElementById(`msg-${first.id}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+  };
+
 
   /* ---- v1.8.0 mobile composer: the "+" sheet + controlled pickers ---- */
   const [sheetOpen, setSheetOpen] = useState(false);
@@ -595,7 +666,56 @@ export function ChatView({
       {/* Room header */}
       <header className="z-10 flex shrink-0 items-center gap-2 border-b border-line bg-surface/90 px-2 py-2.5 backdrop-blur sm:px-5 sm:py-3">
         {headerStart}
-        {(() => {
+        {/* v2.0 in-chat search bar (replaces the plain header while open) */}
+        {searchOpen ? (
+          <div className="flex min-w-0 flex-1 items-center gap-1.5">
+            <div className="relative min-w-0 flex-1">
+              <Search className="pointer-events-none absolute inset-y-0 start-3 my-auto size-4 text-faint" />
+              <input
+                type="search"
+                value={searchQuery}
+                onChange={(e) => runSearch(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    jumpMatch(e.shiftKey ? -1 : 1);
+                  }
+                  if (e.key === "Escape") setSearchOpen(false);
+                }}
+                placeholder={t.chat.searchLabel}
+                aria-label={t.chat.searchLabel}
+                className="input h-10 rounded-full ps-9"
+                autoFocus
+              />
+            </div>
+            {searchQuery.trim().length >= 2 ? (
+              <span className="shrink-0 text-xs font-bold text-muted" dir="ltr">
+                {matches.length === 0
+                  ? fmt(t.chat.searchNoResults, { q: searchQuery.trim().slice(0, 24) })
+                  : fmt(t.chat.searchCount, { n: String(matchIndex + 1), m: String(matches.length) })}
+              </span>
+            ) : null}
+            <button type="button" className="btn btn-ghost btn-icon btn-sm" onClick={() => jumpMatch(-1)} disabled={matches.length === 0} aria-label={t.common.back}>
+              <ChevronUp className="size-4" />
+            </button>
+            <button type="button" className="btn btn-ghost btn-icon btn-sm" onClick={() => jumpMatch(1)} disabled={matches.length === 0} aria-label={t.common.open}>
+              <ChevronDown className="size-4" />
+            </button>
+            <button
+              type="button"
+              className="btn btn-ghost btn-icon btn-sm"
+              onClick={() => {
+                setSearchOpen(false);
+                setSearchQuery("");
+                setMatchIndex(0);
+              }}
+              aria-label={t.common.close}
+            >
+              <X className="size-4" />
+            </button>
+          </div>
+        ) : (
+          (() => {
           const titleBlock = (
             <>
               <Avatar
@@ -641,8 +761,20 @@ export function ChatView({
           ) : (
             titleBlock
           );
-        })()}
+        })()
+        )}
         <div className="flex shrink-0 items-center gap-1.5">
+          {!searchOpen ? (
+            <button
+              type="button"
+              className="btn btn-ghost btn-icon btn-sm"
+              onClick={() => setSearchOpen(true)}
+              aria-label={t.chat.searchLabel}
+              title={t.chat.searchLabel}
+            >
+              <Search className="size-[18px]" />
+            </button>
+          ) : null}
           {room.e2eeEnabled ? (
             <span className="badge badge-accent hidden sm:inline-flex" title={t.e2ee.subtitle}>
               {t.e2ee.badge}
@@ -888,7 +1020,9 @@ export function ChatView({
                               ) : null}
                               {dec.text ? (
                                 <p dir="auto" className="whitespace-pre-wrap">
-                                  {linkify(dec.text)}
+                                  {searchOpen && searchQuery.trim().length >= 2
+                                    ? highlight(dec.text, searchQuery, activeMatch === m.id)
+                                    : linkify(dec.text)}
                                 </p>
                               ) : null}
                             </>
@@ -906,7 +1040,9 @@ export function ChatView({
                             ) : null}
                             {m.body ? (
                               <p dir="auto" className="whitespace-pre-wrap">
-                                {linkify(m.body)}
+                                {searchOpen && searchQuery.trim().length >= 2
+                                  ? highlight(m.body, searchQuery, activeMatch === m.id)
+                                  : linkify(m.body)}
                               </p>
                             ) : null}
                           </>

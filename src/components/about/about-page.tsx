@@ -1,6 +1,6 @@
 "use client";
 
-import { AppHeader, BackToTop, MobileToc, Toc } from "./chrome";
+import { BackToTop, MobileToc, Toc } from "./chrome";
 import { GettingStarted } from "./sections-1";
 import { Messaging, PrivateChats, Rooms } from "./sections-2";
 import { Moderation, Telegram } from "./sections-3";
@@ -8,27 +8,40 @@ import { Account, AppAndLooks, Security } from "./sections-4";
 import { Faq, Limits, Tips } from "./sections-5";
 import { AboutFooter } from "./footer";
 import type { RoomBrief } from "@/components/security/vault-dialog";
+import { useI18n } from "@/components/i18n-provider";
 
-/** «درباره سایت» — the in-app About page (client tree; the server page passes owned rooms). */
+/**
+ * «درباره برنامه» — the in-app About page (client tree; the server page passes
+ * owned rooms). v2.0: rendered INSIDE the dashboard shell (no own AppHeader —
+ * the chat-list sidebar stays on md+), fully bilingual fa/en.
+ */
 export function AboutPage({ rooms }: { rooms: RoomBrief[] }) {
+  const { lang } = useI18n();
+  const isFa = lang === "fa";
   return (
-    <div className="min-h-dvh overflow-x-clip">
-      <AppHeader />
-
+    <div className="min-h-dvh overflow-x-clip pb-24 md:pb-6">
       {/* compact page header */}
-      <div className="mx-auto max-w-6xl px-5 pt-10 sm:pt-14">
+      <div className="mx-auto max-w-6xl px-5 pt-8 sm:pt-12">
         <div className="fade-up">
           <span className="inline-flex items-center gap-2 rounded-full border border-line bg-surface/80 px-3 py-1.5 text-xs font-bold text-ink-2 shadow-soft">
             <span className="live-dot" aria-hidden="true" />
-            درباره سایت
+            {isFa ? "درباره برنامه" : "About the app"}
           </span>
-          <h1 className="mt-5 text-[2rem] font-extrabold leading-[1.4] text-ink sm:text-[2.5rem]">
-            پاندا چت؛ جایی آرام برای <span className="gradient-text">گفتگوهای خصوصی</span>
+          <h1 className={`mt-5 text-[2rem] font-extrabold text-ink sm:text-[2.5rem] ${isFa ? "leading-[1.4]" : "leading-[1.15]"}`}>
+            {isFa ? (
+              <>
+                پاندا چت؛ جایی آرام برای <span className="gradient-text">گفتگوهای خصوصی</span>
+              </>
+            ) : (
+              <>
+                Panda Chat — a calm home for <span className="gradient-text">private conversations</span>
+              </>
+            )}
           </h1>
-          <p className="mt-5 max-w-xl text-[1.02rem] leading-8 text-muted sm:text-lg sm:leading-9">
-            پاندا چت یک پیام‌رسان تحت وب برای ساختن اتاق‌های گفتگوی خصوصی است. هر اتاق یک لینک دعوت طولانی و
-            غیرقابل‌حدس دارد، در صورت تمایل با رمز محافظت می‌شود و از طریق ربات رسمی تلگرام هم قابل پیگیری و مدیریت
-            است. در این صفحه همه امکانات، روش کار، تنظیمات، نکات امنیتی و محدودیت‌های سایت را یک‌جا توضیح داده‌ایم.
+          <p className={`mt-5 max-w-xl text-[1.02rem] text-muted sm:text-lg ${isFa ? "leading-8 sm:leading-9" : "leading-7 sm:leading-8"}`}>
+            {isFa
+              ? "پاندا چت یک پیام‌رسان تحت وب برای ساختن اتاق‌های گفتگوی خصوصی است. هر اتاق یک لینک دعوت طولانی و غیرقابل‌حدس دارد، در صورت تمایل با رمز محافظت می‌شود و از طریق ربات رسمی تلگرام هم قابل پیگیری و مدیریت است. در این صفحه همه امکانات، روش کار، تنظیمات، نکات امنیتی و محدودیت‌های سایت را یک‌جا توضیح داده‌ایم."
+              : "Panda Chat is a web messenger for private chat rooms. Every room gets a long, unguessable invite link, an optional password, and can be managed from the official Telegram bot. This page gathers every feature, how-to, setting, security note and limit in one place."}
           </p>
         </div>
         <MobileToc />

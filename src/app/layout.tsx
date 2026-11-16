@@ -1,6 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import type { ReactNode } from "react";
-import "@fontsource-variable/nunito";
+import "@fontsource-variable/plus-jakarta-sans";
 import "@fontsource-variable/vazirmatn";
 import "./globals.css";
 import { I18nProvider } from "@/components/i18n-provider";
@@ -35,8 +35,8 @@ export const viewport: Viewport = {
   initialScale: 1,
   viewportFit: "cover",
   themeColor: [
-    { media: "(prefers-color-scheme: light)", color: "#f7f8fc" },
-    { media: "(prefers-color-scheme: dark)", color: "#12141c" },
+    { media: "(prefers-color-scheme: light)", color: "#f6f5ff" },
+    { media: "(prefers-color-scheme: dark)", color: "#0d1024" },
   ],
 };
 
