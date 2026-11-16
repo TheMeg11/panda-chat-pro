@@ -50,6 +50,7 @@
   --bubble-out-ink: #ffffff;
   --bubble-in: #ffffff;
   --bubble-in-line: #e8e5f8;
+  --bubble-out: #6a4cff;
   /* doodle pattern for chat surfaces */
   --chat-pattern: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='280' height='280' viewBox='0 0 280 280' fill='none' stroke='%235B3BFF' stroke-opacity='.09' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M30 40h40a8 8 0 0 1 8 8v22a8 8 0 0 1-8 8H50l-12 10V78h-8a8 8 0 0 1-8-8V48a8 8 0 0 1 8-8z'/%3E%3Cpath d='M180 30l52 20-22 8-8 24-8-20zM210 58l-30-28'/%3E%3Cpath d='M76 186c-8-9-24-5-24 8s15 19 24 27c9-8 24-14 24-27s-16-17-24-8z'/%3E%3Ccircle cx='200' cy='196' r='20'/%3E%3Ccircle cx='184' cy='178' r='7'/%3E%3Ccircle cx='216' cy='178' r='7'/%3E%3Cpath d='M136 120l4 9 10 1-8 6 3 10-9-6-9 6 3-10-8-6 10-1z'/%3E%3Ccircle cx='250' cy='120' r='4'/%3E%3Ccircle cx='20' cy='140' r='3'/%3E%3C/svg%3E");
 }
@@ -92,12 +93,15 @@
   --pc-shadow-1: 0 1px 2px rgb(0 0 0 / 0.3), 0 12px 32px -14px rgb(0 0 0 / 0.6);
   --pc-shadow-2: 0 1px 2px rgb(0 0 0 / 0.3), 0 16px 40px -16px rgb(0 0 0 / 0.65);
   --pc-shadow-3: 0 20px 56px -12px rgb(0 0 0 / 0.7), 0 2px 8px rgb(0 0 0 / 0.4);
+  --shadow-pop: 0 20px 56px -12px rgb(0 0 0 / 0.7), 0 2px 8px rgb(0 0 0 / 0.4);
+  --shadow-brand: 0 10px 28px -8px rgb(106 77 255 / 0.55);
   --bubble-out-from: #5b3bff;
   --bubble-out-to: #5b3bff;
   --bubble-out-line: #5b3bff;
   --bubble-out-ink: #ffffff;
   --bubble-in: #1f2348;
   --bubble-in-line: #2a2f5c;
+  --bubble-out: #5b3bff;
   --chat-pattern: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='280' height='280' viewBox='0 0 280 280' fill='none' stroke='%23A898FF' stroke-opacity='.07' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M30 40h40a8 8 0 0 1 8 8v22a8 8 0 0 1-8 8H50l-12 10V78h-8a8 8 0 0 1-8-8V48a8 8 0 0 1 8-8z'/%3E%3Cpath d='M180 30l52 20-22 8-8 24-8-20zM210 58l-30-28'/%3E%3Cpath d='M76 186c-8-9-24-5-24 8s15 19 24 27c9-8 24-14 24-27s-16-17-24-8z'/%3E%3Ccircle cx='200' cy='196' r='20'/%3E%3Ccircle cx='184' cy='178' r='7'/%3E%3Ccircle cx='216' cy='178' r='7'/%3E%3Cpath d='M136 120l4 9 10 1-8 6 3 10-9-6-9 6 3-10-8-6 10-1z'/%3E%3Ccircle cx='250' cy='120' r='4'/%3E%3Ccircle cx='20' cy='140' r='3'/%3E%3C/svg%3E");
 }
 
@@ -125,6 +129,8 @@
   --color-brand-ink: var(--accent-ink);
   --color-side: var(--side);
   --color-side-2: var(--side-2);
+  --color-bubble-in: var(--bubble-in);
+  --color-bubble-out: var(--bubble-out);
   --color-lavender: var(--lavender);
   --color-lavender-soft: var(--lavender-soft);
   --color-sky: var(--sky);
@@ -142,6 +148,8 @@
   --shadow-soft: var(--pc-shadow-1);
   --shadow-card: var(--pc-shadow-2);
   --shadow-float: var(--pc-shadow-3);
+  --shadow-pop: 0 18px 50px -12px rgb(23 26 60 / 0.28), 0 2px 6px rgb(23 26 60 / 0.08);
+  --shadow-brand: 0 10px 24px -8px rgb(91 59 255 / 0.6);
 }
 
 @layer base {
@@ -631,6 +639,46 @@
     background-clip: text;
     color: transparent;
   }
+  /* Theme landing: gradient headline word */
+  .text-gradient {
+    background: linear-gradient(100deg, #4a2be8 0%, #6a4cff 55%, #8f78ff 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  .dark .text-gradient {
+    background: linear-gradient(100deg, #7d66ff 0%, #8f78ff 55%, #a898ff 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  /* Theme landing: doodle-pattern panel (ProductPreview chat area) */
+  .chat-pattern {
+    background-color: var(--canvas-2);
+    background-image: var(--chat-pattern);
+    background-size: 280px 280px;
+  }
+  .anim-float {
+    animation: pc-float 6s ease-in-out infinite;
+  }
+  .anim-fade {
+    animation: pc-landing-fade 0.18s ease-out both;
+  }
+  .dot-typing > span {
+    animation: pc-dot 1.2s infinite ease-in-out;
+  }
+  .dot-typing > span:nth-child(2) {
+    animation-delay: 0.15s;
+  }
+  .dot-typing > span:nth-child(3) {
+    animation-delay: 0.3s;
+  }
+  .pt-safe {
+    padding-top: env(safe-area-inset-top);
+  }
+  .pb-safe {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
   .icon-tile {
     display: inline-grid;
     place-items: center;
@@ -726,11 +774,32 @@
     opacity: 0;
   }
 }
+@keyframes pc-landing-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes pc-dot {
+  0%,
+  60%,
+  100% {
+    opacity: 0.35;
+    transform: translateY(0);
+  }
+  30% {
+    opacity: 1;
+    transform: translateY(-3px);
+  }
+}
 
 @media (prefers-reduced-motion: reduce) {
   .fade-up,
   .pop-in,
   .float-slow,
+  .anim-float,
   .live-dot::after {
     animation: none;
   }

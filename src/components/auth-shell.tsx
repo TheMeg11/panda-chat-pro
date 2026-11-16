@@ -1,20 +1,20 @@
 import type { ReactNode } from "react";
 import type { LucideIcon } from "lucide-react";
-import { KeyRound, Link2, Send, ShieldCheck, Zap } from "lucide-react";
-import { Avatar, Logo, PandaMark } from "./brand";
+import { Lock, ShieldCheck, Zap } from "lucide-react";
+import { Logo } from "./brand";
 import { LangToggle, ThemeToggle } from "./ui";
 import { getI18n } from "@/lib/i18n-server";
 
 /**
- * Two-column auth layout from the v2.0 theme: form on the left, deep-navy
- * brand panel (glows + bullets + chat bubbles) on the right (lg+). Phones
- * get a single calm column with a soft glow behind the header.
+ * Two-column auth layout from the ui-redesign theme: form on the left, deep-navy
+ * brand panel (glows + bullets + panda mascot fading out at the bottom) on the
+ * right (lg+). Phones get a single calm column with a soft glow behind the header.
  */
 export async function AuthShell({ title, subtitle, children }: { title: string; subtitle: string; children: ReactNode }) {
   const { t } = await getI18n();
   const points: Array<[LucideIcon, string]> = [
     [ShieldCheck, t.auth.asidePoint1],
-    [KeyRound, t.auth.asidePoint2],
+    [Lock, t.auth.asidePoint2],
     [Zap, t.auth.asidePoint3],
   ];
   return (
@@ -46,31 +46,26 @@ export async function AuthShell({ title, subtitle, children }: { title: string; 
         <div className="relative p-10">
           <Logo size={42} href={null} onDark />
         </div>
-        <div className="relative flex flex-1 flex-col justify-center px-12 pb-12">
-          <h2 className="max-w-md text-[44px] font-extrabold leading-[1.1] tracking-tight">{t.auth.asideTitle}</h2>
-          <p className="mt-5 max-w-md text-base leading-relaxed text-white/70">{t.auth.asideText}</p>
-          <ul className="mt-9 space-y-4">
+        <div className="relative flex flex-1 flex-col justify-center px-12 pb-6">
+          <h2 className="max-w-md text-[44px] font-extrabold leading-[1.1] tracking-tight">{t.landing.heroTagline}</h2>
+          <ul className="mt-8 space-y-4">
             {points.map(([Icon, text]) => (
               <li key={text} className="flex items-center gap-3 text-base font-semibold text-white/80">
-                <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-white/10 text-white">
-                  <Icon className="size-[18px]" />
+                <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-white/10">
+                  <Icon className="size-[18px] text-[#b3a6ff]" aria-hidden="true" />
                 </span>
                 {text}
               </li>
             ))}
           </ul>
-          <div className="mt-12 max-w-md space-y-3" aria-hidden="true">
-            <div className="flex items-end gap-2">
-              <Avatar name={t.landing.previewMsg1Author} size={30} />
-              <div className="bubble bubble-in max-w-[78%] border-transparent bg-white/10 text-[13px] text-white shadow-none">
-                {t.landing.previewMsg1}
-              </div>
-            </div>
-            <div className="flex justify-end">
-              <div className="bubble bubble-out max-w-[78%] border-transparent text-[13px]">{t.landing.previewMsg2}</div>
-            </div>
-          </div>
         </div>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src="/panda-hero.webp"
+          alt=""
+          className="relative mt-auto w-[78%] max-w-[480px] self-end object-contain [mask-image:linear-gradient(to_bottom,#000_82%,transparent)] rtl:self-start"
+          aria-hidden="true"
+        />
       </aside>
     </div>
   );
