@@ -206,7 +206,32 @@ export function useThemeSnapshot(): ThemeSnapshot {
   return useSyncExternalStore(subscribeTheme, readTheme, () => DEFAULT_THEME);
 }
 
-/** Applies the mode to <html> + localStorage and notifies subscribers. */
+/**
+ * Theme choices are mirrored to cookies: the server layout renders the
+ * `dark` class and `data-palette` straight from them, so the theme survives
+ * reloads even where localStorage is evicted or blocked (in-app browsers,
+ * private modes, iOS storage eviction). JS-readable cookies only.
+ */
+function setThemeCookie(key: string, value: string | null) {
+  try {
+    document.cookie = value
+      ? `${key}=${value}; path=/; max-age=31536000; samesite=lax`
+      : `${key}=; path=/; max-age=0`;
+  } catch {
+    /* cookie writes can fail in locked-down contexts */
+  }
+}
+
+export function readThemeCookie(key: string): string | null {
+  try {
+    const m = document.cookie.match(new RegExp(`(?:^|; )${key}=([^;]*)`));
+    return m ? decodeURIComponent(m[1]) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Applies the mode to <html> + localStorage + cookie and notifies. */
 export function applyThemeMode(next: ThemeMode) {
   const root = document.documentElement;
   const dark = next === "dark" || (next === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches);
@@ -218,6 +243,7 @@ export function applyThemeMode(next: ThemeMode) {
   } catch {
     /* private mode */
   }
+  setThemeCookie(THEME_MODE_KEY, next === "system" ? null : next);
   window.dispatchEvent(new Event(THEME_EVENT));
 }
 
@@ -231,5 +257,32 @@ export function applyThemePalette(id: string) {
   } catch {
     /* private mode */
   }
+  setThemeCookie(THEME_PALETTE_KEY, id === "lavender" ? null : id);
   window.dispatchEvent(new Event(THEME_EVENT));
+}
+
+/**
+ * Re-asserts the stored theme on the <html> element. Runs once after
+ * hydration from the root layout — heals environments where the pre-paint
+ * DOM state is lost (hydration stripping, delayed scripts). Read-only:
+ * never writes storage. Falls back to the cookie when localStorage is empty.
+ */
+export function reassertStoredTheme() {
+  let saved: string | null = null;
+  let pal: string | null = null;
+  try {
+    saved = localStorage.getItem(THEME_MODE_KEY);
+    pal = localStorage.getItem(THEME_PALETTE_KEY);
+  } catch {
+    /* private mode */
+  }
+  if (!saved) saved = readThemeCookie(THEME_MODE_KEY);
+  if (!pal) pal = readThemeCookie(THEME_PALETTE_KEY);
+
+  const dark = saved ? saved === "dark" : window.matchMedia("(prefers-color-scheme: dark)").matches;
+  const root = document.documentElement;
+  root.classList.toggle("dark", dark);
+  root.style.colorScheme = dark ? "dark" : "light";
+  if (pal && pal !== "lavender") root.setAttribute("data-palette", pal);
+  else root.removeAttribute("data-palette");
 }
