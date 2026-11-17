@@ -10,6 +10,7 @@ import { InstallAppCard } from "@/components/pwa";
 import { AvatarForm } from "@/components/dashboard/avatar-form";
 import { NotificationsCard } from "@/components/dashboard/notifications-card";
 import { TelegramCard } from "@/components/dashboard/telegram-card";
+import { ThemeCard } from "@/components/dashboard/theme-card";
 import { ReplayTutorialButton } from "@/components/tutorial/tutorial-gate";
 import { TwoFactorCard } from "@/components/security/twofactor-card";
 import { SecurityCard } from "@/components/security/security-card";
@@ -85,6 +86,7 @@ export default async function AccountPage() {
   const [sinceBefore, sinceAfter = ""] = t.account.memberSince.split("{date}");
 
   const anchors = [
+    { href: "#theme", label: t.common.theme },
     { href: "#account", label: t.common.account },
     { href: "#notifications", label: t.common.notifications },
     { href: "#security", label: t.common.security },
@@ -112,6 +114,12 @@ export default async function AccountPage() {
       </nav>
 
       <div className="space-y-5">
+        {/* ---------------------------------------------------------- */}
+        {/* Theme: light/dark/auto mode + color palettes (device-local)  */}
+        {/* (the card itself is <section id="theme"> + scroll-mt-20)     */}
+        {/* ---------------------------------------------------------- */}
+        <ThemeCard />
+
         {/* ---------------------------------------------------------- */}
         {/* Account: profile (avatar + name + bio), tutorial, danger zone */}
         {/* ---------------------------------------------------------- */}

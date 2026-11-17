@@ -40,8 +40,11 @@ export const viewport: Viewport = {
   ],
 };
 
-// Applies the saved (or system) theme before first paint — avoids a flash of the wrong theme.
-const themeScript = `(function(){try{var s=localStorage.getItem('pc-theme');var d=s?s==='dark':window.matchMedia('(prefers-color-scheme: dark)').matches;var e=document.documentElement;if(d){e.classList.add('dark')}e.style.colorScheme=d?'dark':'light'}catch(_){}})();`;
+// Applies the saved (or system) theme + color palette before first paint —
+// avoids a flash of the wrong theme. `pc-theme` holds "light"/"dark" (absent =
+// follow the device); `pc-palette` holds the accent palette id (default:
+// lavender, applied by CSS without any attribute).
+const themeScript = `(function(){try{var s=localStorage.getItem('pc-theme');var d=s?s==='dark':window.matchMedia('(prefers-color-scheme: dark)').matches;var p=localStorage.getItem('pc-palette');var e=document.documentElement;if(d){e.classList.add('dark')}e.style.colorScheme=d?'dark':'light';if(p&&p!=='lavender'){e.setAttribute('data-palette',p)}}catch(_){}})();`;
 
 /**
  * v1.5.3 stale-chunk recovery: after a redeploy, a long-lived client (open tab,

@@ -152,3 +152,84 @@ export function useNotifyPrefs(): NotifyPrefs {
     () => DEFAULT_NOTIFY_PREFS,
   );
 }
+
+/* ------------------------------------------------------------------ */
+/* Theme: mode (light/dark/system) + color palette                     */
+/* ------------------------------------------------------------------ */
+
+const THEME_MODE_KEY = "pc-theme";
+const THEME_PALETTE_KEY = "pc-palette";
+const THEME_EVENT = "pc-theme-change";
+
+export type ThemeMode = "light" | "dark" | "system";
+export type ThemeSnapshot = { mode: ThemeMode; palette: string; isDark: boolean };
+
+const DEFAULT_THEME: ThemeSnapshot = { mode: "system", palette: "lavender", isDark: false };
+
+let themeCache: { key: string; value: ThemeSnapshot } | null = null;
+
+function readTheme(): ThemeSnapshot {
+  const key = `${localStorage.getItem(THEME_MODE_KEY) ?? ""}|${localStorage.getItem(THEME_PALETTE_KEY) ?? ""}|${document.documentElement.classList.contains("dark")}`;
+  if (themeCache && themeCache.key === key) return themeCache.value;
+  let mode: ThemeMode = "system";
+  let palette = "lavender";
+  try {
+    const saved = localStorage.getItem(THEME_MODE_KEY);
+    if (saved === "dark" || saved === "light") mode = saved;
+    palette = localStorage.getItem(THEME_PALETTE_KEY) || "lavender";
+  } catch {
+    /* private mode */
+  }
+  themeCache = {
+    key,
+    value: { mode, palette, isDark: document.documentElement.classList.contains("dark") },
+  };
+  return themeCache.value;
+}
+
+function subscribeTheme(cb: () => void) {
+  const onChange = () => cb();
+  // other tabs change localStorage; the moon/sun toggle flips the `dark` class
+  window.addEventListener("storage", onChange);
+  window.addEventListener(THEME_EVENT, onChange);
+  const obs = new MutationObserver(onChange);
+  obs.observe(document.documentElement, { attributes: true, attributeFilter: ["class", "data-palette"] });
+  return () => {
+    window.removeEventListener("storage", onChange);
+    window.removeEventListener(THEME_EVENT, onChange);
+    obs.disconnect();
+  };
+}
+
+/** SSR-safe live theme snapshot for the appearance card. */
+export function useThemeSnapshot(): ThemeSnapshot {
+  return useSyncExternalStore(subscribeTheme, readTheme, () => DEFAULT_THEME);
+}
+
+/** Applies the mode to <html> + localStorage and notifies subscribers. */
+export function applyThemeMode(next: ThemeMode) {
+  const root = document.documentElement;
+  const dark = next === "dark" || (next === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches);
+  root.classList.toggle("dark", dark);
+  root.style.colorScheme = dark ? "dark" : "light";
+  try {
+    if (next === "system") localStorage.removeItem(THEME_MODE_KEY);
+    else localStorage.setItem(THEME_MODE_KEY, next);
+  } catch {
+    /* private mode */
+  }
+  window.dispatchEvent(new Event(THEME_EVENT));
+}
+
+/** Applies a color palette (globals.css data-palette blocks) and notifies. */
+export function applyThemePalette(id: string) {
+  const root = document.documentElement;
+  if (id === "lavender") root.removeAttribute("data-palette");
+  else root.setAttribute("data-palette", id);
+  try {
+    localStorage.setItem(THEME_PALETTE_KEY, id);
+  } catch {
+    /* private mode */
+  }
+  window.dispatchEvent(new Event(THEME_EVENT));
+}
