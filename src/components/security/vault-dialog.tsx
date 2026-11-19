@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { FolderLock, KeyRound, ShieldCheck } from "lucide-react";
+import { DoorOpen, FolderLock, KeyRound, ShieldCheck } from "lucide-react";
 import { useI18n } from "@/components/i18n-provider";
 import { Modal } from "@/components/ui";
 import {
@@ -29,6 +29,10 @@ export type VaultDialogProps = {
  * surface mounts this hook — the version footer today, an About footer next.
  * Owns ONLY the counting and the dialog open state.
  */
+/** v2.1.3 — 1400ms was too tight for real fingers (slow tappers never opened
+ * the vault and concluded "nothing exists"); 2200ms stays secret but works. */
+const TAP_WINDOW_MS = 2200;
+
 export function useVersionTap(): { onTap: () => void; open: boolean; setOpen: (open: boolean) => void } {
   const [open, setOpen] = useState(false);
   const [taps, setTaps] = useState(0);
@@ -45,7 +49,7 @@ export function useVersionTap(): { onTap: () => void; open: boolean; setOpen: (o
       return;
     }
     setTaps(next);
-    tapTimer.current = setTimeout(() => setTaps(0), 1400);
+    tapTimer.current = setTimeout(() => setTaps(0), TAP_WINDOW_MS);
   };
 
   return { onTap, open, setOpen };
@@ -195,36 +199,53 @@ function VaultDialogSession({ open, onOpenChange, rooms }: VaultDialogProps) {
         <div className="space-y-2">
           {flash ? <p className="notice notice-mint pop-in">{flash}</p> : null}
           {hiddenIds.length === 0 ? <p className="py-4 text-center text-sm text-muted">{t.privacy.noHidden}</p> : null}
-          {hiddenIds.map((id) => (
-            <div key={id} className="flex items-center gap-3 rounded-xl border border-line bg-surface-2 px-3.5 py-3">
-              <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-surface-3 text-accent-ink">
-                <FolderLock className="size-4" />
-              </span>
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-bold text-ink" dir="auto">
-                  {byId.get(id) ?? t.privacy.deletedRoom}
-                </p>
-                <p className="text-[11px] text-muted">{t.privacy.hiddenBadge}</p>
+          {/* v2.1.3 — row redesign: the chat name with a kind badge, then
+              Open + Unhide as real labeled buttons with icons (full-width tap
+              targets on phones, inline on wider screens). Before this, hidden
+              DMs/joined rooms rendered as "Deleted room" with NO Open button —
+              the only visible action (Unhide) sent the chat back to the main
+              list, which read exactly like "the hidden chat doesn't exist". */}
+          {hiddenIds.map((id) => {
+            const name = byId.get(id);
+            const known = byId.has(id);
+            const kind = rooms.find((r) => r.id === id)?.kind;
+            return (
+              <div key={id} className="flex flex-wrap items-center gap-3 rounded-xl border border-line bg-surface-2 px-3.5 py-3">
+                <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-surface-3 text-accent-ink">
+                  <FolderLock className="size-4" />
+                </span>
+                <div className="min-w-0 flex-1 basis-40">
+                  <p className="truncate text-sm font-bold text-ink" dir="auto">
+                    {name ?? t.privacy.deletedRoom}
+                  </p>
+                  <p className="mt-0.5 flex items-center gap-1.5 text-[11px] text-muted">
+                    {known && kind === "dm" ? <span className="rounded-full bg-surface-3 px-1.5 py-0.5 text-[10px] font-bold text-faint">DM</span> : null}
+                    {known && kind && kind !== "dm" ? <span className="rounded-full bg-surface-3 px-1.5 py-0.5 text-[10px] font-bold text-faint">{t.privacy.hiddenBadge}</span> : null}
+                  </p>
+                </div>
+                <div className="flex w-full items-center gap-2 sm:w-auto">
+                  {known ? (
+                    <Link href={`/dashboard/rooms/${id}`} className="btn btn-secondary btn-sm flex-1 justify-center sm:flex-none" onClick={() => close()}>
+                      <DoorOpen className="size-4" />
+                      {t.common.open}
+                    </Link>
+                  ) : null}
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm flex-1 justify-center sm:flex-none"
+                    onClick={() => {
+                      unhideRoom(id);
+                      setHiddenIds((prev) => prev.filter((x) => x !== id));
+                      router.refresh();
+                    }}
+                  >
+                    <ShieldCheck className="size-4" />
+                    {t.privacy.unhide}
+                  </button>
+                </div>
               </div>
-              {byId.has(id) ? (
-                <Link href={`/dashboard/rooms/${id}`} className="btn btn-secondary btn-sm" onClick={() => close()}>
-                  {t.common.open}
-                </Link>
-              ) : null}
-              <button
-                type="button"
-                className="btn btn-ghost btn-sm"
-                onClick={() => {
-                  unhideRoom(id);
-                  setHiddenIds((prev) => prev.filter((x) => x !== id));
-                  router.refresh();
-                }}
-              >
-                <ShieldCheck className="size-4" />
-                {t.privacy.unhide}
-              </button>
-            </div>
-          ))}
+            );
+          })}
           {hiddenIds.length > 0 ? <p className="pt-2 text-center text-[11px] text-faint">{t.privacy.hiddenNote}</p> : null}
           {realMode ? (
             <button

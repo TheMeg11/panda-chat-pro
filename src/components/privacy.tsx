@@ -74,7 +74,12 @@ export function HideRoomModal({
   }, [open, roomId]);
 
   const finishHide = useCallback(() => {
-    hideRoom(roomId);
+    // v2.1.3 — if the write can't persist (private mode / quota), STOP and tell
+    // the user instead of faking a hide that "undoes itself" on next reload.
+    if (!hideRoom(roomId)) {
+      setError(t.privacy.storageFailed);
+      return;
+    }
     const el = document.querySelector(`[data-room-id="${roomId}"]`);
     if (el instanceof HTMLElement) el.style.display = "none";
     onClose();
@@ -85,7 +90,7 @@ export function HideRoomModal({
       return;
     }
     router.refresh();
-  }, [roomId, onClose, onHidden, router]);
+  }, [roomId, onClose, onHidden, router, t]);
 
   return (
     <Modal
@@ -102,7 +107,7 @@ export function HideRoomModal({
             setError(null);
             if (pin.length < 4) return setError(t.privacy.pinShort);
             if (pin !== pin2) return setError(t.privacy.pinMismatch);
-            await setVaultPin(pin);
+            if (!(await setVaultPin(pin))) return setError(t.privacy.storageFailed);
             finishHide();
           }}
         >

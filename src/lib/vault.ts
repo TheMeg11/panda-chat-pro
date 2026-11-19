@@ -60,12 +60,16 @@ export function readVault(): Vault | null {
   }
 }
 
-export function writeVault(v: Vault | null) {
+export function writeVault(v: Vault | null): boolean {
   try {
     if (v) localStorage.setItem(VAULT_KEY, JSON.stringify(v));
     else localStorage.removeItem(VAULT_KEY);
+    return true;
   } catch {
-    /* storage unavailable */
+    // Storage unavailable (private mode, quota, eviction). Callers must NOT
+    // pretend the operation succeeded — a silently dropped write makes a
+    // hidden chat "come back" after the next reload with no explanation.
+    return false;
   }
 }
 
@@ -106,10 +110,10 @@ export function isRoomHidden(roomId: string): boolean {
   return Boolean(v && roomId in v.ids);
 }
 
-export function hideRoom(roomId: string) {
+export function hideRoom(roomId: string): boolean {
   const v = readVault() ?? { s: b64urlSalt(), h: "", ids: {} };
   v.ids[roomId] = new Date().toISOString();
-  writeVault(v);
+  return writeVault(v);
 }
 
 export function unhideRoom(roomId: string) {
@@ -139,10 +143,10 @@ export function panicModeEnabled(): boolean {
   return Boolean(v?.panic);
 }
 
-export async function setPin(pin: string): Promise<void> {
+export async function setPin(pin: string): Promise<boolean> {
   const v = readVault() ?? { s: b64urlSalt(), h: "", ids: {} };
   v.h = await sha256Hex(`${v.s}:${pin}`);
-  writeVault(v);
+  return writeVault(v);
 }
 
 /** Sets or clears (empty string) the decoy PIN. */

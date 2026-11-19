@@ -868,7 +868,8 @@ const en = {
   },
   privacy: {
     hide: "Hide chat",
-    hideConfirm: "This chat will disappear from your list on this device. You can bring it back from Settings → tap the app version 5 times.",
+    hideConfirm: "This chat will disappear from your list on this device. To bring it back: About the app → scroll to the very bottom → tap the app version 5 times.",
+    storageFailed: "This browser\u2019s storage is unavailable (private mode or full storage?), so the chat couldn\u2019t be hidden on this device.",
     // v1.5.3 — hide via 5s long-press on the chat card (or the chat/room header)
     holdToHide: "Hold for 5 seconds to hide this chat",
     holding: "Keep holding to hide…",
@@ -1864,7 +1865,8 @@ const fa: Dict = {
   },
   privacy: {
     hide: "مخفی کردن چت",
-    hideConfirm: "این چت از فهرست شما روی همین دستگاه حذف می‌شود. برگرداندنش: تنظیمات ← پنج بار روی نسخه برنامه ضربه بزنید.",
+    hideConfirm: "این چت از فهرست شما روی همین دستگاه حذف می‌شود. برگرداندنش: صفحهٔ «دربارهٔ سایت» ← تا انتهای صفحه اسکرول کنید ← پنج بار روی نسخهٔ برنامه ضربه بزنید.",
+    storageFailed: "حافظهٔ این مرورگر در دسترس نیست (حالت ناشناس یا پر بودن حافظه؟)، به همین دلیل چت روی این دستگاه مخفی نشد.",
     // v1.5.3 — مخفی‌کردن با نگه‌داشتن ۵ ثانیه روی کارت چت (یا بالای صفحه چت/اتاق)
     holdToHide: "برای مخفی کردن این چت، ۵ ثانیه نگهش دارید",
     holding: "همچنان نگه دارید تا مخفی شود…",
