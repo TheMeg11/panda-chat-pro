@@ -76,6 +76,8 @@ function previewOf(chat: VaultChat, privateFallback: string): string {
   if (chat.lastMessage) {
     const body =
       chat.lastMessage.fileName && !chat.lastMessage.body ? `📎 ${chat.lastMessage.fileName}` : chat.lastMessage.body;
+    // the DM-creation system marker reads as "no conversation yet" here
+    if (body === "dmCreated") return privateFallback;
     const prefix = chat.type === "room" && chat.lastMessage.author !== "system" ? `${chat.lastMessage.author}: ` : "";
     return prefix + body.replace(/\s+/g, " ").slice(0, 90);
   }
