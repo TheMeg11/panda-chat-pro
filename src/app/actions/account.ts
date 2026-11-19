@@ -27,12 +27,13 @@ export async function updateProfileAction(_prev: ActionState, formData: FormData
 }
 
 /* ------------------------------------------------------------------ */
-/* Profile avatar (PNG / JPEG / WebP, magic-byte verified)            */
+/* Profile avatar (PNG / JPEG / WebP, magic-byte verified; big phone  */
+/* photos are downscaled client-side before they ever hit the wire)     */
 /* ------------------------------------------------------------------ */
 
 const AVATAR_MIMES = new Set(["image/png", "image/jpeg", "image/webp"]);
-const AVATAR_MIN_BYTES = 64 * 1024;
-const AVATAR_MAX_BYTES = 2 * 1024 * 1024;
+const AVATAR_MIN_BYTES = 1024;
+const AVATAR_MAX_BYTES = 4 * 1024 * 1024;
 
 /** Replaces the caller's stored avatar (single row per account). */
 export async function uploadAvatarAction(_prev: ActionState, formData: FormData): Promise<ActionState> {

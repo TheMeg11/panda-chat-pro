@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ImagePlus, Trash2 } from "lucide-react";
 import { removeAvatarAction, uploadAvatarAction } from "@/app/actions/account";
@@ -51,17 +51,27 @@ export function AvatarForm({
   );
 }
 
-/** The file-picker button; lives inside <ActionForm> to read its state. */
+/**
+ * The file-picker button; lives inside <ActionForm> to read its state.
+ *
+ * The success effect must depend ONLY on `state`: `onUploaded` is an inline
+ * arrow with a new identity on every render, and depending on it made the
+ * effect re-run after its own re-render — an infinite loop of avatar
+ * refetches + RSC refreshes (~50 req/s) that also swallowed every *further*
+ * upload attempt. The callback is read through a ref instead.
+ */
 function UploadButton({ onUploaded }: { onUploaded: () => void }) {
   const { t } = useI18n();
   const { state, pending } = useFormState();
   const router = useRouter();
+  const uploadedRef = useRef(onUploaded);
+  uploadedRef.current = onUploaded;
 
   useEffect(() => {
     if (!state.ok) return;
-    onUploaded();
+    uploadedRef.current();
     router.refresh();
-  }, [state, onUploaded, router]);
+  }, [state, router]);
 
   return (
     <label className={cn("btn btn-secondary cursor-pointer", pending && "pointer-events-none opacity-60")}>
@@ -73,8 +83,51 @@ function UploadButton({ onUploaded }: { onUploaded: () => void }) {
         accept="image/png,image/jpeg,image/webp"
         name="avatar"
         disabled={pending}
-        onChange={(e) => e.currentTarget.form?.requestSubmit()}
+        onChange={onPickFile}
       />
     </label>
   );
+}
+
+/**
+ * Phone photos are 3–10 MB — far past the old server caps, which made the
+ * request fail with no visible feedback. Downscale to a ≤1024px JPEG before
+ * the request leaves the browser; the original is kept when decoding fails.
+ */
+async function normalizeAvatarFile(file: File): Promise<File> {
+  if (file.size <= 400 * 1024) return file;
+  try {
+    const url = URL.createObjectURL(file);
+    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const el = new Image();
+      el.onload = () => resolve(el);
+      el.onerror = () => reject(new Error("decode failed"));
+      el.src = url;
+    });
+    const scale = Math.min(1, 1024 / Math.max(img.naturalWidth, img.naturalHeight));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(img.naturalWidth * scale));
+    canvas.height = Math.max(1, Math.round(img.naturalHeight * scale));
+    canvas.getContext("2d")?.drawImage(img, 0, 0, canvas.width, canvas.height);
+    URL.revokeObjectURL(url);
+    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.85));
+    if (!blob) return file;
+    return new File([blob], `${file.name.replace(/\.[^.]+$/, "")}.jpg`, { type: "image/jpeg" });
+  } catch {
+    return file;
+  }
+}
+
+/** File-pick handler: normalize oversized images, then auto-submit the form. */
+async function onPickFile(event: React.ChangeEvent<HTMLInputElement>) {
+  const input = event.currentTarget;
+  const file = input.files?.[0];
+  if (!file) return;
+  const normalized = await normalizeAvatarFile(file);
+  if (normalized !== file) {
+    const dt = new DataTransfer();
+    dt.items.add(normalized);
+    input.files = dt.files;
+  }
+  input.form?.requestSubmit();
 }
