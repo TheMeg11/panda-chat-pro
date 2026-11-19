@@ -410,7 +410,12 @@ export type DashboardChat = {
  * user hid are EXCLUDED server-side (hidden_rooms table) so a hidden chat
  * stays hidden across reloads, browsers and devices — no client filtering.
  */
-export async function listDashboardChats(user: { id: string; displayName: string }, deviceHash?: string | null): Promise<DashboardChat[]> {
+export async function listDashboardChats(
+  user: { id: string; displayName: string },
+  deviceHash?: string | null,
+  /** v2.2.0 — the vault passes true to fetch the HIDDEN chats themselves. */
+  opts?: { includeHidden?: boolean },
+): Promise<DashboardChat[]> {
   const hash = dmDeviceHash(user.id);
   const rows = await db
     .select({ room: rooms })
@@ -433,8 +438,11 @@ export async function listDashboardChats(user: { id: string; displayName: string
             and (m.user_id = ${user.id}${deviceHash ? sql` or m.device_hash = ${deviceHash}` : sql``})
         )`,
         ),
-        // v2.2.0 — never leak hidden chats into the visible list (or the API payload)
-        sql`not exists (select 1 from hidden_rooms h where h.user_id = ${user.id} and h.room_id = ${rooms.id})`,
+        // v2.2.0 — never leak hidden chats into the visible list (or the API
+        // payload). The vault opts in with includeHidden to list them.
+        ...(opts?.includeHidden
+          ? []
+          : [sql`not exists (select 1 from hidden_rooms h where h.user_id = ${user.id} and h.room_id = ${rooms.id})`]),
       ),
     )
     .orderBy(desc(rooms.lastActivityAt))

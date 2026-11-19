@@ -60,7 +60,7 @@ export async function listHiddenChats(): Promise<VaultChat[]> {
     .where(eq(hiddenRooms.userId, user.id));
   if (rows.length === 0) return [];
   const ids = new Set(rows.map((r) => r.roomId));
-  const chats = await listDashboardChats(user, await readDeviceHash());
+  const chats = await listDashboardChats(user, await readDeviceHash(), { includeHidden: true });
   return chats
     .filter((c) => ids.has(c.id))
     .map((c) => ({
