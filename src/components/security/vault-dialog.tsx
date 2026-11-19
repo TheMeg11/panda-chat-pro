@@ -1,38 +1,46 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+/**
+ * v2.2.0 — the hidden-chats vault, SERVER-backed.
+ *
+ * Entry: five quick taps on the version number (About page footer) → PIN →
+ * the hidden list. The list renders with the SAME building blocks as the main
+ * dashboard list (avatar, name, live preview, relative time, unread dot) and
+ * every row carries Open (tap the row) and Unhide (the trailing button).
+ *
+ * All state lives on the account now (hidden_rooms + users.hidden_pin_hash):
+ * hiding survives reloads, browsers and devices, and every action revalidates
+ * the dashboard so both lists update the instant the server answers.
+ */
+
+import { useEffect, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { DoorOpen, FolderLock, KeyRound, ShieldCheck } from "lucide-react";
-import { useI18n } from "@/components/i18n-provider";
-import { Modal } from "@/components/ui";
+import { EyeOff, FolderLock, KeyRound, ShieldCheck } from "lucide-react";
 import {
-  hiddenRoomIds,
-  setPin as setVaultPin,
-  unhideRoom,
-  unlockVault,
-  vaultHasPin,
-} from "@/lib/vault";
-import { logoutAction } from "@/app/actions/auth";
+  changeVaultPinAction,
+  listHiddenChats,
+  setVaultPinAction,
+  unhideChatAction,
+  vaultStatusAction,
+  verifyVaultAction,
+  type VaultChat,
+} from "@/app/actions/vault";
+import { Avatar } from "@/components/brand";
+import { useI18n } from "@/components/i18n-provider";
+import { Modal, SubmitButton } from "@/components/ui";
 
-/** The chat list the vault shows — same shape the settings page already passes to VersionTap. */
-export type RoomBrief = { id: string; name: string; kind?: string };
+type Stage = "loading" | "setup" | "unlock" | "list" | "change";
 
-export type VaultDialogProps = {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  rooms: RoomBrief[];
-};
-
-/**
- * The secret entrance gesture: 5 quick taps (reset window 1400ms) on whatever
- * surface mounts this hook — the version footer today, an About footer next.
- * Owns ONLY the counting and the dialog open state.
- */
 /** v2.1.3 — 1400ms was too tight for real fingers (slow tappers never opened
  * the vault and concluded "nothing exists"); 2200ms stays secret but works. */
 const TAP_WINDOW_MS = 2200;
 
+/**
+ * The secret entrance gesture: five quick taps (reset window 2200ms) on the
+ * version line in the About page footer. Owns ONLY the counting and the
+ * dialog open state.
+ */
 export function useVersionTap(): { onTap: () => void; open: boolean; setOpen: (open: boolean) => void } {
   const [open, setOpen] = useState(false);
   const [taps, setTaps] = useState(0);
@@ -55,273 +63,232 @@ export function useVersionTap(): { onTap: () => void; open: boolean; setOpen: (o
   return { onTap, open, setOpen };
 }
 
-/**
- * The hidden-chats vault modal — reusable footer guest (settings today, About next).
- *
- * Views:
- *  - no PIN yet            → PIN SETUP (create one, then unlock and list)
- *  - PIN set               → UNLOCK (existing flow, copied verbatim)
- *    · real PIN            → HIDDEN LIST (+ change-PIN entry, real mode only)
- *    · decoy PIN           → the identical, innocent "no hidden chats" state
- *    · decoy PIN + panic   → local wipe + session logout
- *
- * All vault state is device-local; the PIN never leaves this browser.
- */
-export function VaultDialog(props: VaultDialogProps) {
-  // Remount the flow tree whenever the dialog opens or closes, so every entry
-  // starts from a pristine state without reset effects.
-  return <VaultDialogSession key={props.open ? "open" : "closed"} {...props} />;
+const PIN_ERROR_KEYS = {
+  wrongPin: "wrongPin",
+  pinShort: "pinShort",
+  pinMismatch: "pinMismatch",
+  pinExists: "pinExists",
+  noPin: "setupTitle",
+} as const;
+
+/** Same preview rule the main chat list uses (chat-list.tsx `preview`). */
+function previewOf(chat: VaultChat, privateFallback: string): string {
+  if (chat.lastMessage) {
+    const body =
+      chat.lastMessage.fileName && !chat.lastMessage.body ? `📎 ${chat.lastMessage.fileName}` : chat.lastMessage.body;
+    const prefix = chat.type === "room" && chat.lastMessage.author !== "system" ? `${chat.lastMessage.author}: ` : "";
+    return prefix + body.replace(/\s+/g, " ").slice(0, 90);
+  }
+  return chat.type === "dm" ? privateFallback : "—";
 }
 
-type Stage = "setup" | "unlock" | "list" | "change";
+/** Tiny relative-time formatter for the list rows (fa/en aware). */
+function relTime(iso: string, lang: string): string {
+  const diff = Date.now() - new Date(iso).getTime();
+  const min = Math.round(diff / 60_000);
+  if (min < 1) return lang === "fa" ? "همین حالا" : "now";
+  if (min < 60) return lang === "fa" ? `${min} دقیقه` : `${min}m`;
+  const hours = Math.round(min / 60);
+  if (hours < 24) return lang === "fa" ? `${hours} ساعت` : `${hours}h`;
+  const days = Math.round(hours / 24);
+  if (days < 7) return lang === "fa" ? `${days} روز` : `${days}d`;
+  return new Date(iso).toLocaleDateString(lang === "fa" ? "fa-IR" : "en-US", { month: "short", day: "numeric" });
+}
 
-function VaultDialogSession({ open, onOpenChange, rooms }: VaultDialogProps) {
-  const { t } = useI18n();
+/** Remount the whole flow each time the dialog opens/closes — pristine state. */
+export function VaultDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
+  return <VaultDialogSession key={open ? "open" : "closed"} open={open} onOpenChange={onOpenChange} />;
+}
+
+function VaultDialogSession({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
+  const { t, lang } = useI18n();
   const router = useRouter();
-  // First view by PIN state, picked when the dialog session mounts (open === true).
-  const [stage, setStage] = useState<Stage>(() => (vaultHasPin() ? "unlock" : "setup"));
-  const [pin, setPin] = useState("");
-  const [pin2, setPin2] = useState("");
+  const [stage, setStage] = useState<Stage>("loading");
+  const [chats, setChats] = useState<VaultChat[]>([]);
   const [error, setError] = useState<string | null>(null);
-  /** transient success note shown once inside the list view (setup / change) */
   const [flash, setFlash] = useState<string | null>(null);
-  const [hiddenIds, setHiddenIds] = useState<string[]>([]);
-  /** true only after a REAL-PIN unlock (or fresh setup) — decoy sessions never see the change-PIN affordance */
-  const [realMode, setRealMode] = useState(false);
+  const [pending, startTransition] = useTransition();
 
   const close = () => onOpenChange(false);
+  const errText = (code: string) => {
+    const key = PIN_ERROR_KEYS[code as keyof typeof PIN_ERROR_KEYS];
+    return key ? String(t.privacy[key]) : code;
+  };
 
-  const byId = new Map(rooms.map((r) => [r.id, r.name]));
+  // Which first view? The server decides (PIN set → unlock, else → setup).
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    (async () => {
+      const status = await vaultStatusAction();
+      if (!cancelled) setStage(status.hasPin ? "unlock" : "setup");
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
+
+  const openList = (rows: VaultChat[]) => {
+    setChats(rows);
+    setStage("list");
+  };
+
+  const unhide = (roomId: string) => {
+    startTransition(async () => {
+      const fd = new FormData();
+      fd.set("roomId", roomId);
+      const res = await unhideChatAction({}, fd);
+      if (res?.ok) {
+        setChats((prev) => prev.filter((c) => c.id !== roomId));
+        router.refresh(); // the main list gets the chat back instantly
+      } else if (res?.error) {
+        setError(errText(res.error));
+      }
+    });
+  };
 
   return (
     <>
-      {/* -------------------------------------------------- PIN SETUP */}
+      {/* ------------------------------------------------ LOADING */}
+      <Modal open={open && stage === "loading"} onClose={close} title={t.privacy.unlockTitle}>
+        <div className="flex justify-center py-6">
+          <span className="size-6 animate-spin rounded-full border-2 border-line border-t-accent-ink" />
+        </div>
+      </Modal>
+
+      {/* ------------------------------------------------ PIN SETUP (first time) */}
       <Modal open={open && stage === "setup"} onClose={close} title={t.privacy.setupTitle} subtitle={t.privacy.setupText}>
         <form
           className="space-y-4"
           onSubmit={async (e) => {
             e.preventDefault();
             setError(null);
-            if (pin.length < 4) return setError(t.privacy.pinShort);
-            if (pin !== pin2) return setError(t.privacy.pinMismatch);
-            const value = pin;
-            await setVaultPin(value);
-            setPin("");
-            setPin2("");
-            // Replicate exactly what a successful unlock does (unlockVault →
-            // sessionStorage mode "real") so hiddenRoomIds() works in this tab.
-            await unlockVault(value);
-            setRealMode(true);
-            setHiddenIds(hiddenRoomIds());
-            setFlash(t.privacy.setupSuccess);
-            setStage("list");
+            const fd = new FormData(e.currentTarget);
+            const res = await setVaultPinAction({}, fd);
+            if (res?.ok) {
+              setFlash(t.privacy.setupSuccess);
+              openList(await listHiddenChats());
+            } else if (res?.error) {
+              setError(errText(res.error));
+            }
           }}
         >
-          <input
-            type="password"
-            className="input"
-            value={pin}
-            onChange={(e) => setPin(e.target.value)}
-            placeholder={t.privacy.pin}
-            autoFocus
-            autoComplete="new-password"
-            dir="ltr"
-          />
-          <input
-            type="password"
-            className="input"
-            value={pin2}
-            onChange={(e) => setPin2(e.target.value)}
-            placeholder={t.privacy.pinConfirm}
-            autoComplete="new-password"
-            dir="ltr"
-          />
-          {error ? <p className="notice notice-rose">{error}</p> : null}
-          <div className="flex gap-2">
-            <button type="button" className="btn btn-secondary flex-1" onClick={close}>
-              {t.common.cancel}
-            </button>
-            <button type="submit" className="btn btn-primary flex-1">
-              <KeyRound className="size-4" />
-              {t.privacy.setupSubmit}
-            </button>
-          </div>
+          <input className="input h-11 w-full" type="password" name="pin" placeholder={t.privacy.pin} dir="ltr" autoComplete="new-password" required />
+          <input className="input h-11 w-full" type="password" name="pin2" placeholder={t.privacy.pinConfirm} dir="ltr" autoComplete="new-password" required />
+          {error ? <p className="text-sm font-semibold text-rose-ink">{error}</p> : null}
+          <SubmitButton className="btn btn-primary w-full justify-center">{t.privacy.setupSubmit}</SubmitButton>
         </form>
       </Modal>
 
-      {/* -------------------------------------------------- UNLOCK (existing flow) */}
+      {/* ------------------------------------------------ UNLOCK */}
       <Modal open={open && stage === "unlock"} onClose={close} title={t.privacy.unlockTitle} subtitle={t.privacy.unlockText}>
         <form
           className="space-y-4"
           onSubmit={async (e) => {
             e.preventDefault();
             setError(null);
-            const result = await unlockVault(pin);
-            setPin("");
-            if (!result) {
-              setError(t.privacy.wrongPin);
-              return;
+            const fd = new FormData(e.currentTarget);
+            const res = await verifyVaultAction({}, fd);
+            if (res?.ok) {
+              openList((res.data?.chats as VaultChat[]) ?? []);
+            } else if (res?.error) {
+              setError(errText(res.error));
             }
-            if (result.panicked) {
-              // Panic mode fired: the local vault is gone; lock the session too.
-              close();
-              await logoutAction();
-              return;
-            }
-            // REAL pin → list the hidden chats. DECOY pin → an empty, ordinary
-            // vault screen that is indistinguishable from "nothing is hidden".
-            setRealMode(result.mode === "real");
-            setHiddenIds(result.mode === "real" ? hiddenRoomIds() : []);
-            setFlash(null);
-            setStage("list");
           }}
         >
-          <input
-            type="password"
-            className="input"
-            value={pin}
-            onChange={(e) => setPin(e.target.value)}
-            placeholder={t.privacy.pin}
-            autoFocus
-            autoComplete="off"
-            dir="ltr"
-          />
-          {error ? <p className="notice notice-rose">{error}</p> : null}
-          <button type="submit" className="btn btn-primary w-full">
-            <KeyRound className="size-4" />
-            {t.common.open}
-          </button>
+          <input className="input h-11 w-full" type="password" name="pin" placeholder={t.privacy.pin} dir="ltr" autoComplete="current-password" autoFocus required />
+          {error ? <p className="text-sm font-semibold text-rose-ink">{error}</p> : null}
+          <SubmitButton className="btn btn-primary w-full justify-center">{t.common.open}</SubmitButton>
         </form>
       </Modal>
 
-      {/* -------------------------------------------------- HIDDEN LIST (existing rendering) */}
-      <Modal open={open && stage === "list"} onClose={close} title={t.privacy.hiddenList}>
-        <div className="space-y-2">
-          {flash ? <p className="notice notice-mint pop-in">{flash}</p> : null}
-          {hiddenIds.length === 0 ? <p className="py-4 text-center text-sm text-muted">{t.privacy.noHidden}</p> : null}
-          {/* v2.1.3 — row redesign: the chat name with a kind badge, then
-              Open + Unhide as real labeled buttons with icons (full-width tap
-              targets on phones, inline on wider screens). Before this, hidden
-              DMs/joined rooms rendered as "Deleted room" with NO Open button —
-              the only visible action (Unhide) sent the chat back to the main
-              list, which read exactly like "the hidden chat doesn't exist". */}
-          {hiddenIds.map((id) => {
-            const name = byId.get(id);
-            const known = byId.has(id);
-            const kind = rooms.find((r) => r.id === id)?.kind;
-            return (
-              <div key={id} className="flex flex-wrap items-center gap-3 rounded-xl border border-line bg-surface-2 px-3.5 py-3">
-                <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-surface-3 text-accent-ink">
-                  <FolderLock className="size-4" />
-                </span>
-                <div className="min-w-0 flex-1 basis-40">
-                  <p className="truncate text-sm font-bold text-ink" dir="auto">
-                    {name ?? t.privacy.deletedRoom}
-                  </p>
-                  <p className="mt-0.5 flex items-center gap-1.5 text-[11px] text-muted">
-                    {known && kind === "dm" ? <span className="rounded-full bg-surface-3 px-1.5 py-0.5 text-[10px] font-bold text-faint">DM</span> : null}
-                    {known && kind && kind !== "dm" ? <span className="rounded-full bg-surface-3 px-1.5 py-0.5 text-[10px] font-bold text-faint">{t.privacy.hiddenBadge}</span> : null}
-                  </p>
-                </div>
-                <div className="flex w-full items-center gap-2 sm:w-auto">
-                  {known ? (
-                    <Link href={`/dashboard/rooms/${id}`} className="btn btn-secondary btn-sm flex-1 justify-center sm:flex-none" onClick={() => close()}>
-                      <DoorOpen className="size-4" />
-                      {t.common.open}
-                    </Link>
-                  ) : null}
+      {/* ------------------------------------------------ HIDDEN LIST (main-page UI) */}
+      <Modal open={open && stage === "list"} onClose={close} title={t.privacy.hiddenList} subtitle={t.privacy.hiddenNote}>
+        <p className="mb-2 flex items-center gap-2 text-xs font-bold text-muted">
+          <FolderLock className="size-3.5 text-accent-ink" aria-hidden="true" />
+          {t.privacy.hiddenCount.replace("{n}", String(chats.length))}
+        </p>
+        {flash ? <p className="mb-3 rounded-xl bg-surface-2 px-3 py-2 text-sm font-bold text-accent-ink">{flash}</p> : null}
+        {error ? <p className="mb-3 text-sm font-semibold text-rose-ink">{error}</p> : null}
+
+        {chats.length === 0 ? (
+          <div className="flex flex-col items-center gap-3 py-8 text-center">
+            <EyeOff className="size-8 text-faint" aria-hidden="true" />
+            <p className="text-sm text-muted">{t.privacy.noHidden}</p>
+          </div>
+        ) : (
+          <ul className="flex max-h-[min(30rem,60vh)] flex-col gap-0.5 overflow-y-auto overscroll-contain" data-testid="hidden-chat-list">
+            {chats.map((chat) => (
+              <li key={chat.id} className="relative">
+                {/* red unread dot — Telegram-style, same as the main list */}
+                <span
+                  aria-hidden="true"
+                  className={`absolute start-[0.45rem] top-1/2 z-10 size-[0.55rem] -translate-y-1/2 rounded-full bg-[#e0355f] shadow-[0_0_0_2px_var(--surface)] ${chat.hasUnread ? "block" : "hidden"}`}
+                />
+                <div className="flex min-h-[72px] items-center gap-2 rounded-2xl px-2.5 py-2.5 transition hover:bg-surface-2">
+                  <Link href={`/dashboard/rooms/${chat.id}`} className="flex min-w-0 flex-1 items-center gap-3" onClick={close}>
+                    <Avatar name={chat.name} size={46} square={chat.type !== "dm"} />
+                    <div className="min-w-0 flex-1 leading-tight">
+                      <div className="flex items-baseline justify-between gap-2">
+                        <h3 className="truncate text-[0.92rem] font-extrabold text-ink" dir="auto">
+                          {chat.name}
+                        </h3>
+                        <span className="shrink-0 whitespace-nowrap text-[11px] text-faint">{relTime(chat.lastActivityAt, lang)}</span>
+                      </div>
+                      <div className="mt-0.5 flex items-center gap-1.5">
+                        <p className="truncate text-xs text-muted" dir="auto">
+                          {previewOf(chat, t.dm.previewPrivate)}
+                        </p>
+                        {chat.hasPassword ? <KeyRound className="size-3 shrink-0 text-faint" aria-hidden="true" /> : null}
+                      </div>
+                    </div>
+                  </Link>
                   <button
                     type="button"
-                    className="btn btn-ghost btn-sm flex-1 justify-center sm:flex-none"
-                    onClick={() => {
-                      unhideRoom(id);
-                      setHiddenIds((prev) => prev.filter((x) => x !== id));
-                      router.refresh();
-                    }}
+                    onClick={() => unhide(chat.id)}
+                    disabled={pending}
+                    className="btn btn-ghost btn-sm shrink-0 gap-1.5 text-muted hover:text-ink"
+                    aria-label={`${t.privacy.unhide}: ${chat.name}`}
                   >
-                    <ShieldCheck className="size-4" />
-                    {t.privacy.unhide}
+                    <ShieldCheck className="size-4 rtl:-scale-x-100" aria-hidden="true" />
+                    <span className="hidden min-[420px]:inline">{t.privacy.unhide}</span>
                   </button>
                 </div>
-              </div>
-            );
-          })}
-          {hiddenIds.length > 0 ? <p className="pt-2 text-center text-[11px] text-faint">{t.privacy.hiddenNote}</p> : null}
-          {realMode ? (
-            <button
-              type="button"
-              className="btn btn-soft btn-sm w-full"
-              onClick={() => {
-                setPin("");
-                setPin2("");
-                setError(null);
-                setFlash(null);
-                setStage("change");
-              }}
-            >
-              <KeyRound className="size-4" />
-              {t.privacy.changePin}
-            </button>
-          ) : null}
+              </li>
+            ))}
+          </ul>
+        )}
+
+        <div className="mt-4 flex flex-col gap-2 border-t border-line pt-4 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-xs text-faint">{t.privacy.vaultServerNote}</p>
+          <button type="button" className="btn btn-soft btn-sm shrink-0 self-start" onClick={() => setStage("change")}>
+            {t.privacy.changePin}
+          </button>
         </div>
       </Modal>
 
-      {/* -------------------------------------------------- CHANGE PIN */}
-      <Modal open={open && stage === "change"} onClose={close} title={t.privacy.changeTitle} subtitle={t.privacy.pinText}>
+      {/* ------------------------------------------------ CHANGE PIN */}
+      <Modal open={open && stage === "change"} onClose={close} title={t.privacy.changeTitle}>
         <form
           className="space-y-4"
           onSubmit={async (e) => {
             e.preventDefault();
             setError(null);
-            if (pin.length < 4) return setError(t.privacy.pinShort);
-            if (pin !== pin2) return setError(t.privacy.pinMismatch);
-            // Only the real-PIN hash is replaced; salt, hidden ids and any
-            // decoy hash stay untouched — everything device-local, as always.
-            await setVaultPin(pin);
-            setPin("");
-            setPin2("");
-            setFlash(t.privacy.changeSuccess);
-            setStage("list");
+            const fd = new FormData(e.currentTarget);
+            const res = await changeVaultPinAction({}, fd);
+            if (res?.ok) {
+              setFlash(t.privacy.changeSuccess);
+              setStage("list");
+            } else if (res?.error) {
+              setError(errText(res.error));
+            }
           }}
         >
-          <input
-            type="password"
-            className="input"
-            value={pin}
-            onChange={(e) => setPin(e.target.value)}
-            placeholder={t.privacy.pin}
-            autoFocus
-            autoComplete="new-password"
-            dir="ltr"
-          />
-          <input
-            type="password"
-            className="input"
-            value={pin2}
-            onChange={(e) => setPin2(e.target.value)}
-            placeholder={t.privacy.pinConfirm}
-            autoComplete="new-password"
-            dir="ltr"
-          />
-          {error ? <p className="notice notice-rose">{error}</p> : null}
-          <div className="flex gap-2">
-            <button
-              type="button"
-              className="btn btn-secondary flex-1"
-              onClick={() => {
-                setPin("");
-                setPin2("");
-                setError(null);
-                setStage("list");
-              }}
-            >
-              {t.common.back}
-            </button>
-            <button type="submit" className="btn btn-primary flex-1">
-              <KeyRound className="size-4" />
-              {t.privacy.changePin}
-            </button>
-          </div>
+          <input className="input h-11 w-full" type="password" name="oldPin" placeholder={t.privacy.pinCurrent} dir="ltr" autoComplete="current-password" required />
+          <input className="input h-11 w-full" type="password" name="pin" placeholder={t.privacy.pinNew} dir="ltr" autoComplete="new-password" required />
+          <input className="input h-11 w-full" type="password" name="pin2" placeholder={t.privacy.pinConfirm} dir="ltr" autoComplete="new-password" required />
+          {error ? <p className="text-sm font-semibold text-rose-ink">{error}</p> : null}
+          <SubmitButton className="btn btn-primary w-full justify-center">{t.privacy.changeSubmit}</SubmitButton>
         </form>
       </Modal>
     </>

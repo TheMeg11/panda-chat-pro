@@ -7,6 +7,7 @@ import {
   integer,
   jsonb,
   pgTable,
+  primaryKey,
   text,
   timestamp,
   uniqueIndex,
@@ -40,6 +41,8 @@ export const users = pgTable("users", {
   canUseTelegram: boolean("can_use_telegram").notNull().default(true),
   /** Per-user room limit override (null = platform default) */
   maxRooms: integer("max_rooms"),
+  /** v2.2.0 — scrypt hash of the hidden-chats vault PIN (server-side now) */
+  hiddenPinHash: text("hidden_pin_hash"),
   createdAt: ts("created_at").notNull().defaultNow(),
   lastLoginAt: ts("last_login_at"),
 });
@@ -145,6 +148,26 @@ export const userOnboarding = pgTable("user_onboarding", {
  * a block row between the two DM participants in BOTH directions, so either
  * side blocking freezes the 1:1 conversation for both participants.
  */
+/**
+ * v2.2.0 — chats the user hid from their list. SERVER-side per account now:
+ * hiding survives reloads, browsers and devices exactly like every other
+ * account setting (the old device-local localStorage vault kept "reverting"
+ * on browsers that evict storage). `listDashboardChats` excludes these rows.
+ */
+export const hiddenRooms = pgTable(
+  "hidden_rooms",
+  {
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    roomId: uuid("room_id")
+      .notNull()
+      .references(() => rooms.id, { onDelete: "cascade" }),
+    hiddenAt: ts("hidden_at").notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.roomId] })],
+);
+
 export const userBlocks = pgTable(
   "user_blocks",
   {

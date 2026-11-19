@@ -296,3 +296,13 @@ CREATE TABLE IF NOT EXISTS user_blocks (
   created_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE UNIQUE INDEX IF NOT EXISTS user_blocks_pair_idx ON user_blocks (blocker_id, blocked_id);
+
+-- v2.2.0 — hidden chats: server-side per account (replaces the device-local vault).
+CREATE TABLE IF NOT EXISTS hidden_rooms (
+  user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  room_id uuid NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
+  hidden_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (user_id, room_id)
+);
+CREATE INDEX IF NOT EXISTS hidden_rooms_room_idx ON hidden_rooms (room_id);
+ALTER TABLE users ADD COLUMN IF NOT EXISTS hidden_pin_hash text;

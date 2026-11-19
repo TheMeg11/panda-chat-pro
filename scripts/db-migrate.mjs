@@ -27,6 +27,16 @@ if (IS_CLI && !DATABASE_URL) {
 }
 
 export const MIGRATIONS = [
+  // v2.2.0 — hidden chats moved from device-local storage to the server
+  `create table if not exists hidden_rooms (
+     user_id uuid not null references users(id) on delete cascade,
+     room_id uuid not null references rooms(id) on delete cascade,
+     hidden_at timestamptz not null default now(),
+     primary key (user_id, room_id)
+   )`,
+  `create index if not exists hidden_rooms_room_idx on hidden_rooms (room_id)`,
+  `alter table users add column if not exists hidden_pin_hash text`,
+
   `alter table rooms add column if not exists e2ee_enabled boolean not null default false`,
   `alter table rooms add column if not exists default_ttl integer`,
   `alter table messages add column if not exists expires_at timestamptz`,

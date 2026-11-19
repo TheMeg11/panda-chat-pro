@@ -1,7 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { MIGRATIONS } from "../../scripts/db-migrate.mjs";
-import { HOLD_TO_HIDE_MS } from "../../src/components/privacy";
 import { APP_VERSION } from "../../src/lib/version";
 
 /**
@@ -24,12 +23,12 @@ describe("v1.6.0 contracts", () => {
     expect(sql).toContain("ADD COLUMN IF NOT EXISTS announced_at timestamptz");
   });
 
-  it("keeps the 5-second hold-to-hide gesture while removing its visuals", () => {
-    expect(HOLD_TO_HIDE_MS).toBe(5000);
-    const src = readFileSync(new URL("../../src/components/privacy.tsx", import.meta.url), "utf8");
-    // the progress bar + "holding…" overlay are gone — the gesture stays silent
-    expect(src).not.toContain("t.privacy.holding");
-    expect(src).not.toContain("Math.round(progress");
+  it("v2.2.0: hold-to-hide is replaced by the instant server action", () => {
+    const menu = readFileSync(new URL("../../src/components/chat/chat-menu.tsx", import.meta.url), "utf8");
+    expect(menu).toContain("hideChatAction");
+    const privacy = readFileSync(new URL("../../src/components/privacy.tsx", import.meta.url), "utf8");
+    expect(privacy).not.toContain("HOLD_TO_HIDE");
+    expect(privacy).not.toContain("localStorage");
   });
 
   it("service worker: new cache version + notification click routing", () => {
@@ -56,7 +55,8 @@ describe("v1.6.0 contracts", () => {
   it("health endpoint exposes the deploy version marker", () => {
     const src = readFileSync(new URL("../../src/app/api/health/route.ts", import.meta.url), "utf8");
     expect(src).toContain("ver: APP_VERSION");
-    expect(APP_VERSION).toBe("2.0.0");
+    // dynamic: the marker must track the release version, whatever it is
+    expect(/^\d+\.\d+\.\d+$/.test(APP_VERSION)).toBe(true);
   });
 
   it("v1.8.0 mobile UX contracts: unread dot, DM parity, double-tap reply, composer sheet, captcha", () => {

@@ -1,109 +1,41 @@
 import { describe, expect, it } from "vitest";
-import { checkPin, hiddenRoomIds, hideRoom, isRoomHidden, panicClearVault, setDecoyPin, setPin, unlockVault, vaultHasPin, writeVault, readVault, setPanicMode, panicModeEnabled, lockVault, vaultMode } from "@/lib/vault";
-import { afterEach, beforeEach } from "vitest";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
+import { hashPassword, verifyPassword } from "@/lib/crypto";
 
-/** localStorage / sessionStorage shims for the node test env. */
-beforeEach(() => {
-  const store = new Map<string, string>();
-  // @ts-expect-error -- partial DOM shim
-  globalThis.localStorage = {
-    getItem: (k: string) => store.get(k) ?? null,
-    setItem: (k: string, v: string) => void store.set(k, v),
-    removeItem: (k: string) => void store.delete(k),
-    clear: () => store.clear(),
-  };
-  const session = new Map<string, string>();
-  // @ts-expect-error -- partial DOM shim
-  globalThis.sessionStorage = {
-    getItem: (k: string) => session.get(k) ?? null,
-    setItem: (k: string, v: string) => void session.set(k, v),
-    removeItem: (k: string) => void session.delete(k),
-  };
-});
+const ROOT = join(import.meta.dirname, "..", "..");
 
-afterEach(() => {
-  // @ts-expect-error -- cleanup shim
-  delete globalThis.localStorage;
-  // @ts-expect-error -- cleanup shim
-  delete globalThis.sessionStorage;
-});
-
-const ROOM = "11111111-1111-4111-8111-111111111111";
-
-describe("hidden chat vault", () => {
-  it("hides and unhides rooms locally", () => {
-    hideRoom(ROOM);
-    expect(isRoomHidden(ROOM)).toBe(true);
-    expect(hiddenRoomIds()).toContain(ROOM);
+/**
+ * v2.2.0 — the hidden-chats vault moved from device-local localStorage to the
+ * server (`hidden_rooms` table + `users.hidden_pin_hash`). These tests guard
+ * the migration surface: every deploy path (fresh init.sql, idempotent
+ * db-migrate) must create the new state layer, and the PIN hashing round-trip
+ * must be the same scrypt scheme the account password uses.
+ */
+describe("server-side hidden-chats vault", () => {
+  it("init.sql creates hidden_rooms + users.hidden_pin_hash", async () => {
+    const sql = await readFile(join(ROOT, "sql", "init.sql"), "utf8");
+    expect(sql).toContain("CREATE TABLE IF NOT EXISTS hidden_rooms");
+    expect(sql).toContain("hidden_pin_hash");
+    expect(sql).toContain("PRIMARY KEY (user_id, room_id)");
   });
 
-  it("requires a PIN to be set before unlock works", async () => {
-    hideRoom(ROOM);
-    expect(vaultHasPin()).toBe(false);
-    expect(await unlockVault("1234")).toBeNull(); // nothing to unlock yet (no hash)
-  });
-});
-
-describe("decoy PIN (§4.3)", () => {
-  it("real PIN unlocks the real vault", async () => {
-    hideRoom(ROOM);
-    await setPin("9999");
-    const result = await unlockVault("9999");
-    expect(result).toEqual({ mode: "real", panicked: false });
-    expect(vaultMode()).toBe("real");
-    expect(hiddenRoomIds()).toContain(ROOM);
+  it("db-migrate creates hidden_rooms + users.hidden_pin_hash idempotently", async () => {
+    const src = await readFile(join(ROOT, "scripts", "db-migrate.mjs"), "utf8");
+    expect(src).toContain("create table if not exists hidden_rooms");
+    expect(src).toContain("alter table users add column if not exists hidden_pin_hash");
   });
 
-  it("decoy PIN unlocks an EMPTY view (nothing hints at hidden chats)", async () => {
-    hideRoom(ROOM);
-    await setPin("9999");
-    await setDecoyPin("0000");
-    lockVault();
-    const result = await unlockVault("0000");
-    expect(result).toEqual({ mode: "decoy", panicked: false });
-    // In decoy mode NOTHING is hidden — because "nothing exists".
-    expect(hiddenRoomIds()).toEqual([]);
-    expect(isRoomHidden(ROOM)).toBe(false);
+  it("listDashboardChats excludes hidden rooms server-side", async () => {
+    const src = await readFile(join(ROOT, "src", "lib", "rooms.ts"), "utf8");
+    expect(src).toContain("not exists (select 1 from hidden_rooms");
   });
 
-  it("wrong PIN is simply wrong (no hint about a second PIN)", async () => {
-    await setPin("9999");
-    await setDecoyPin("0000");
-    expect(await unlockVault("4321")).toBeNull();
-  });
-});
-
-describe("panic mode (§4.3)", () => {
-  it("decoy PIN + panic mode WIPES the vault", async () => {
-    hideRoom(ROOM);
-    await setPin("9999");
-    await setDecoyPin("0000");
-    setPanicMode(true);
-    expect(panicModeEnabled()).toBe(true);
-
-    const result = await unlockVault("0000");
-    expect(result).toEqual({ mode: "decoy", panicked: true });
-    // The vault is GONE: no pin, no hidden ids, no mode.
-    expect(readVault()).toBeNull();
-    expect(vaultHasPin()).toBe(false);
-    expect(vaultMode()).toBeNull();
-  });
-
-  it("real PIN with panic mode still unlocks normally", async () => {
-    hideRoom(ROOM);
-    await setPin("9999");
-    await setDecoyPin("0000");
-    setPanicMode(true);
-    const result = await unlockVault("9999");
-    expect(result).toEqual({ mode: "real", panicked: false });
-    expect(hiddenRoomIds()).toContain(ROOM);
-  });
-
-  it("panicClearVault destroys everything on demand", () => {
-    hideRoom(ROOM);
-    writeVault(readVault());
-    expect(panicClearVault()).toBe(true);
-    expect(readVault()).toBeNull();
-    expect(panicClearVault()).toBe(false); // second call: nothing left
+  it("vault PIN hashing round-trips (scrypt, same scheme as account passwords)", async () => {
+    const hash = await hashPassword("1234");
+    expect(hash.startsWith("scrypt$")).toBe(true);
+    expect(await verifyPassword("1234", hash)).toBe(true);
+    expect(await verifyPassword("9999", hash)).toBe(false);
+    expect(await verifyPassword("1234", null)).toBe(false);
   });
 });

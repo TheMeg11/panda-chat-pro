@@ -406,8 +406,9 @@ export type DashboardChat = {
 
 /**
  * Everything the Telegram-style chat list needs — rooms owned by the user plus
- * 1:1 chats they participate in — with last-message previews. Deliberately does
- * NOT count hidden chats anywhere: the client hides vault rooms before paint.
+ * 1:1 chats they participate in — with last-message previews. v2.2.0: chats the
+ * user hid are EXCLUDED server-side (hidden_rooms table) so a hidden chat
+ * stays hidden across reloads, browsers and devices — no client filtering.
  */
 export async function listDashboardChats(user: { id: string; displayName: string }, deviceHash?: string | null): Promise<DashboardChat[]> {
   const hash = dmDeviceHash(user.id);
@@ -415,8 +416,9 @@ export async function listDashboardChats(user: { id: string; displayName: string
     .select({ room: rooms })
     .from(rooms)
     .where(
-      or(
-        eq(rooms.ownerId, user.id),
+      and(
+        or(
+          eq(rooms.ownerId, user.id),
         and(
           eq(rooms.type, "dm"),
           sql`exists (select 1 from room_members m where m.room_id = ${rooms.id} and m.device_hash = ${hash} and m.role = 'owner')`,
@@ -430,6 +432,9 @@ export async function listDashboardChats(user: { id: string; displayName: string
             and m.nickname is not null
             and (m.user_id = ${user.id}${deviceHash ? sql` or m.device_hash = ${deviceHash}` : sql``})
         )`,
+        ),
+        // v2.2.0 — never leak hidden chats into the visible list (or the API payload)
+        sql`not exists (select 1 from hidden_rooms h where h.user_id = ${user.id} and h.room_id = ${rooms.id})`,
       ),
     )
     .orderBy(desc(rooms.lastActivityAt))

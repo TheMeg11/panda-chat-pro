@@ -32,7 +32,7 @@ import { blockPeerAction, clearChatAction } from "@/app/actions/rooms";
 import { logoutAction } from "@/app/actions/auth";
 import { Avatar } from "@/components/brand";
 import { useI18n } from "@/components/i18n-provider";
-import { HideRoomModal } from "@/components/privacy";
+import { hideChatAction } from "@/app/actions/vault";
 import { ActionForm, LangToggle, SubmitButton, ThemeToggle } from "@/components/ui";
 import { errorText } from "@/lib/i18n";
 import { cn, fmt } from "@/lib/utils";
@@ -58,7 +58,6 @@ export function ChatHamburgerMenu({ roomId, variant, isOwner, blocked, onAfterAc
   const { t } = useI18n();
   const router = useRouter();
   const [open, setOpen] = useState(false);
-  const [hideOpen, setHideOpen] = useState(false);
   const [blockState, blockFormAction, blockPending] = useActionState(blockPeerAction, {});
 
   return (
@@ -72,10 +71,6 @@ export function ChatHamburgerMenu({ roomId, variant, isOwner, blocked, onAfterAc
       >
         <Menu className="size-5" />
       </button>
-
-      {hideOpen ? (
-        <HideRoomModal roomId={roomId} open onClose={() => setHideOpen(false)} onHidden={() => window.location.assign("/dashboard")} />
-      ) : null}
 
       {open ? (
         <>
@@ -128,17 +123,16 @@ export function ChatHamburgerMenu({ roomId, variant, isOwner, blocked, onAfterAc
               </ActionForm>
             ) : null}
 
-            <button
-              type="button"
-              onClick={() => {
-                setOpen(false);
-                setHideOpen(true);
-              }}
-              className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-sm font-semibold text-ink transition hover:bg-surface-3"
-            >
-              <EyeOff className="size-4" />
-              {t.dm.hideChat}
-            </button>
+            {/* v2.2.0 — hiding is instant and server-side: one confirm, no PIN.
+                The action lands in hidden_rooms, revalidates the dashboard and
+                bounces back to the list with the chat already gone. */}
+            <ActionForm action={hideChatAction} confirm={t.privacy.hideConfirm}>
+              <input type="hidden" name="roomId" value={roomId} />
+              <SubmitButton className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-sm font-semibold text-ink transition hover:bg-surface-3">
+                <EyeOff className="size-4" />
+                {t.dm.hideChat}
+              </SubmitButton>
+            </ActionForm>
 
             <div className="my-1 border-t border-line" />
 

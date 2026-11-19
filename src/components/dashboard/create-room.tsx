@@ -5,7 +5,6 @@ import { Plus } from "lucide-react";
 import { createRoomAction } from "@/app/actions/rooms";
 import { useI18n } from "@/components/i18n-provider";
 import { ActionForm, Modal, PasswordInput, SubmitButton } from "@/components/ui";
-import { hiddenRoomIds } from "@/lib/vault";
 import { cn, fmt } from "@/lib/utils";
 
 type Props = {
@@ -25,9 +24,8 @@ export function CreateRoomButton({ disabled = false, className, fab = false, roo
 
   const openModal = () => {
     if (typeof totalRooms === "number") {
-      // Hidden (vault) rooms are subtracted so the hint never reveals them.
-      const hidden = hiddenRoomIds().filter((id) => /^[0-9a-f-]{36}$/.test(id)).length;
-      setUsed(Math.max(0, totalRooms - hidden));
+      // v2.2.0 — hidden rooms are excluded server-side; totalRooms is already clean.
+      setUsed(totalRooms);
     } else {
       setUsed(null);
     }

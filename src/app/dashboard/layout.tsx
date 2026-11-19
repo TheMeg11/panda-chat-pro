@@ -2,11 +2,9 @@ import type { ReactNode } from "react";
 import { Megaphone, Wrench } from "lucide-react";
 import { DashboardShell } from "@/components/dashboard/dashboard-shell";
 import { ChatListPanel } from "@/components/dashboard/chat-list";
-import { HiddenRoomsBoot } from "@/components/privacy";
 import { NotifyManager } from "@/components/notify-manager";
 import { TutorialGate } from "@/components/tutorial/tutorial-gate";
 import { requireUser } from "@/lib/auth";
-import { HIDE_BOOT_SCRIPT } from "@/lib/vault-boot";
 import { getI18n } from "@/lib/i18n-server";
 import { getOnboardingState } from "@/lib/onboarding";
 import { getSettings, roomLimitFor } from "@/lib/settings";
@@ -16,12 +14,10 @@ export const dynamic = "force-dynamic";
 /**
  * Telegram-style dashboard shell.
  *
- * PRIVACY (audit §4.4 / feature §4.4): the conversation list is NOT embedded in
- * the server-rendered HTML anymore. The server cannot know which chats are
- * hidden (the vault is device-local), so ANY server-rendered list would leak
- * hidden conversation names/previews in view-source. The list now loads from
- * /api/chats (no-store) inside the browser, after the pre-paint vault rules
- * are already in place. Hidden chats still never flash.
+ * PRIVACY (audit §4.4 / feature §4.4): the conversation list loads client-side
+ * from /api/chats (no-store) for live sync. v2.2.0: hidden chats are excluded
+ * SERVER-side (hidden_rooms), so neither the API payload nor any server HTML
+ * can leak them — no pre-paint hiding needed anymore.
  */
 export default async function DashboardLayout({ children }: { children: ReactNode }) {
   const user = await requireUser();
@@ -30,8 +26,6 @@ export default async function DashboardLayout({ children }: { children: ReactNod
   if (settings.maintenanceMode) {
     return (
       <div className="flex h-dvh flex-col">
-        <script dangerouslySetInnerHTML={{ __html: HIDE_BOOT_SCRIPT }} />
-        <HiddenRoomsBoot />
         <div className="grid h-full place-items-center px-6 py-16">
           <div className="card max-w-md p-8 text-center">
             <span className="icon-tile mx-auto bg-amber-soft text-amber-ink">
@@ -57,9 +51,6 @@ export default async function DashboardLayout({ children }: { children: ReactNod
 
   return (
     <div className="flex h-dvh flex-col">
-      {/* Pre-paint: hide vault rooms before the chat list renders. */}
-      <script dangerouslySetInnerHTML={{ __html: HIDE_BOOT_SCRIPT }} />
-      <HiddenRoomsBoot />
       <DashboardShell
         panel={
           <ChatListPanel

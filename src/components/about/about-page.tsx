@@ -7,7 +7,6 @@ import { Moderation, Telegram } from "./sections-3";
 import { Account, AppAndLooks, Security } from "./sections-4";
 import { Faq, Limits, Tips } from "./sections-5";
 import { AboutFooter } from "./footer";
-import type { RoomBrief } from "@/components/security/vault-dialog";
 import { useI18n } from "@/components/i18n-provider";
 
 /**
@@ -15,7 +14,7 @@ import { useI18n } from "@/components/i18n-provider";
  * owned rooms). v2.0: rendered INSIDE the dashboard shell (no own AppHeader —
  * the chat-list sidebar stays on md+), fully bilingual fa/en.
  */
-export function AboutPage({ rooms }: { rooms: RoomBrief[] }) {
+export function AboutPage() {
   const { lang } = useI18n();
   const isFa = lang === "fa";
   return (
@@ -68,7 +67,7 @@ export function AboutPage({ rooms }: { rooms: RoomBrief[] }) {
         </main>
       </div>
 
-      <AboutFooter rooms={rooms} />
+      <AboutFooter />
       <BackToTop />
     </div>
   );
