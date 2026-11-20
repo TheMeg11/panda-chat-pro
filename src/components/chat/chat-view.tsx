@@ -41,6 +41,15 @@ import { useHydrated } from "@/components/ui";
 import { EmojiPicker } from "@/components/chat/emoji-picker";
 import { GifPicker } from "@/components/chat/gif-picker";
 import { useVoiceRecorder, VoiceBars, VoicePlayer, formatSecs } from "@/components/chat/voice";
+import {
+  captureRows,
+  cleanupGhosts,
+  flyFromInput,
+  reducedMotion,
+  springRearrange,
+  type FlightPlan,
+  type RowSnapshot,
+} from "@/components/chat/msg-motion";
 import type { ChatMessage, ChatSnapshot } from "@/lib/chat";
 import { errorText, formatDate, formatNumber } from "@/lib/i18n";
 import { cn, fmt, relative } from "@/lib/utils";
@@ -157,6 +166,31 @@ export function ChatView({
   const [retryable, setRetryable] = useState(false);
   // v2.3.0 — Telegram-style voice recording (mic → stop/send/trash → send)
   const voice = useVoiceRecorder();
+  /* ---- v2.4.0 premium message motion (fly-from-input + spring wave) ---- */
+  const rowsRef = useRef<RowSnapshot[]>([]); // tops captured before each commit
+  const prevIdsRef = useRef<number[]>(messages.map((m) => m.id));
+  const skipMotionRef = useRef(true); // initial load never animates
+  const flightRef = useRef<FlightPlan | null>(null);
+  const cancelAnimRef = useRef<Animation[]>([]);
+  const instantScrollRef = useRef(false);
+  useEffect(() => cleanupGhosts, []);
+
+  /** Captured by send() right before the snapshot lands, so the composer's
+      on-screen position is measured before the draft clears. */
+  const planFlight = (id: number, mine: boolean) => {
+    const ta = inputRef.current;
+    // The composer form is the stable anchor (the textarea unmounts during the
+    // voice flow); its rect is captured before the draft clears.
+    const form = ta?.closest("form") ?? document.querySelector("form[data-tutorial=composer]");
+    const fromRect = (ta ?? form)?.getBoundingClientRect();
+    if (!fromRect) return;
+    flightRef.current = {
+      id,
+      mine,
+      from: { x: fromRect.left, y: fromRect.top + fromRect.height / 2 - 14, width: fromRect.width },
+    };
+    instantScrollRef.current = true; // measure the destination on a settled layout
+  };
   const [expiredFiles, setExpiredFiles] = useState<Set<string>>(new Set());
   const fileInputRef = useRef<HTMLInputElement>(null);
   /* ---- Swipe-to-reply (touch): tracks one gesture at a time ---- */
@@ -251,6 +285,7 @@ export function ChatView({
   const apply = useCallback(
     (snap: ChatSnapshot) => {
     versionRef.current = snap.stateVersion;
+    if (snap.reset) skipMotionRef.current = true;
     setRoom(snap.room);
     if (snap.room.direct && onPeerSeen) onPeerSeen(snap.room.peerLastSeenAt ?? null);
     if (snap.reset) {
@@ -393,16 +428,61 @@ export function ChatView({
     scrollToBottom(false);
   }, [scrollToBottom]);
 
+  /* v2.4.0 — premium message motion: FLIP + spring wave for the surrounding
+     bubbles and a fly-from-input ghost for own sends. Runs in the layout
+     phase so the destination is measured before paint; the initial load and
+     history resets render instantly. */
+  useLayoutEffect(() => {
+    if (skipMotionRef.current || reducedMotion()) {
+      skipMotionRef.current = false;
+      prevIdsRef.current = messages.map((m) => m.id);
+      rowsRef.current = captureRows(listRef.current);
+      return;
+    }
+    const prevIds = new Set(prevIdsRef.current);
+    prevIdsRef.current = messages.map((m) => m.id);
+    const fresh = messages.filter((m) => !prevIds.has(m.id));
+    if (!fresh.length) {
+      rowsRef.current = captureRows(listRef.current);
+      return;
+    }
+    const freshIds = new Set(fresh.map((m) => m.id));
+
+    // Own send: fly the bubble from the composer to its measured destination.
+    const plan = flightRef.current;
+    flightRef.current = null;
+    if (plan && freshIds.has(plan.id) && !room.e2eeEnabled) {
+      instantScrollRef.current = true;
+    }
+    if (atBottomRef.current) scrollToBottom(instantScrollRef.current ? false : true);
+    instantScrollRef.current = false;
+    if (atBottomRef.current) setUnseen(0);
+
+    // Springs for every existing row that moved (staggered → the wave).
+    if (rowsRef.current.length) springRearrange(rowsRef.current);
+
+    if (plan && freshIds.has(plan.id) && !room.e2eeEnabled) {
+      const row = document.getElementById(`msg-${plan.id}`);
+      if (row) flyFromInput(row, plan, cancelAnimRef.current);
+    }
+    // Fresh rows get a one-shot entrance (class add → CSS animation).
+    for (const m of fresh) {
+      const row = document.getElementById(`msg-${m.id}`);
+      if (row && !row.classList.contains("msg-ghosting")) row.classList.add("msg-in");
+    }
+    rowsRef.current = captureRows(listRef.current);
+  }, [messages, scrollToBottom, room.e2eeEnabled]);
+
   useLayoutEffect(() => {
     const added = messages.length - countRef.current;
     countRef.current = messages.length;
+    if (added <= 0) return;
     if (atBottomRef.current) {
-      scrollToBottom(true);
       setUnseen(0);
-    } else if (added > 0) {
+    } else {
       setUnseen((n) => n + added);
     }
-  }, [messages, scrollToBottom]);
+  }, [messages]);
 
   useLayoutEffect(() => {
     const el = inputRef.current;
@@ -487,6 +567,10 @@ export function ChatView({
         }
         return;
       }
+      const sentId = data.messages.length ? data.messages[data.messages.length - 1].id : null;
+      // v2.4.0 — fly-from-input: capture the composer position BEFORE the
+      // draft clears / the message is inserted.
+      if (sentId !== null && atBottomRef.current) planFlight(sentId, true);
       setDraft("");
       setPendingFile(null);
       setReplyTo(null);
@@ -917,6 +1001,7 @@ export function ChatView({
                 <div
                   key={m.id}
                   id={`msg-${m.id}`}
+                  data-msg-row=""
                   className={cn("group flex gap-2", mine ? "justify-end" : "justify-start", cont ? "mt-1" : "mt-4")}
                 >
                   {!mine ? (
@@ -942,6 +1027,7 @@ export function ChatView({
                     <div
                       role="button"
                       tabIndex={0}
+                      data-bubble=""
                       /* Swipe-to-reply: a horizontal drag nudges the bubble sideways and
                          ≥72px of committed movement (either direction — works in RTL and
                          LTR alike) starts a reply. Vertical scrolling stays native
@@ -1504,7 +1590,13 @@ export function ChatView({
           <div className="mt-1.5 flex min-h-4 items-center justify-between gap-3 px-1 text-[11px] text-faint">
             <span className="hidden sm:inline">{composerLocked ? "" : t.chat.sendHint}</span>
             {voice.micError ? (
-              <span className="font-semibold text-rose-ink">{t.chat.micDenied}</span>
+              <span className="font-semibold text-rose-ink">
+                {voice.micError === "denied"
+                  ? t.chat.micDenied
+                  : voice.micError === "busy"
+                    ? t.chat.micBusy
+                    : t.chat.micUnsupported}
+              </span>
             ) : error ? (
               <span className="flex items-center gap-2">
                 <span className="font-semibold text-rose-ink">{errorText(t, error)}</span>

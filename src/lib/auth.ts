@@ -75,15 +75,18 @@ export const getCurrentUser = cache(async (): Promise<CurrentUser | null> => {
       .catch(() => undefined);
   }
   // avatarVersion lets clients cache-bust /api/users/<id>/avatar without
-  // ever shipping the bytes themselves (1 = avatar exists, 0 = none).
+  // ever shipping the bytes themselves (updatedAt epoch, 0 = no avatar).
+  // v2.4.0 — the version is the row's updatedAt epoch: re-uploading a new
+  // picture always produces a fresh URL, so stale cached avatars can't stick
+  // around on clients (previously it was a constant 1 and never busted).
   let avatarVersion = 0;
   try {
     const [avatar] = await db
-      .select({ userId: userAvatars.userId })
+      .select({ userId: userAvatars.userId, updatedAt: userAvatars.updatedAt })
       .from(userAvatars)
       .where(eq(userAvatars.userId, row.user.id))
       .limit(1);
-    avatarVersion = avatar ? 1 : 0;
+    avatarVersion = avatar ? Math.max(1, Math.floor(avatar.updatedAt.getTime() / 1000)) : 0;
   } catch {
     /* table not migrated yet */
   }

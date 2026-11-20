@@ -808,6 +808,17 @@
   .rec-pulse {
     animation: pc-rec-pulse 1.6s var(--ease-soft) infinite;
   }
+  /* v2.4.0 — premium message motion: one-shot entrance for fresh rows and the
+     hidden real bubble while its ghost flies from the composer. */
+  .msg-in > [data-bubble] {
+    animation: pc-msg-in 0.24s var(--ease-soft) both;
+  }
+  .msg-ghosting {
+    opacity: 0 !important;
+  }
+  .msg-ghost {
+    pointer-events: none;
+  }
   /* Hide scrollbars (emoji/gif picker grids) while keeping them scrollable. */
   .no-scrollbar {
     scrollbar-width: none;
@@ -855,6 +866,16 @@
   from {
     opacity: 0;
     transform: translateY(6px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes pc-msg-in {
+  from {
+    opacity: 0;
+    transform: translateY(7px);
   }
   to {
     opacity: 1;
@@ -919,6 +940,7 @@
   .float-slow,
   .anim-float,
   .rec-pulse,
+  .msg-in > [data-bubble],
   .live-dot::after {
     animation: none;
   }

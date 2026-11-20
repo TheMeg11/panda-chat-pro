@@ -157,7 +157,13 @@ export function ChatListPanel({ chats: initialChats, user, roomLimit, totalRooms
 
   const preview = (chat: DashboardChat): string => {
     if (chat.lastMessage) {
-      const body = chat.lastMessage.fileName && !chat.lastMessage.body ? `📎 ${chat.lastMessage.fileName}` : chat.lastMessage.body;
+      // v2.4.0 — voice clips read as "Voice message", not a raw file name.
+      const body =
+        chat.lastMessage.fileName?.startsWith("voice-") && !chat.lastMessage.body
+          ? t.dm.voicePreview
+          : chat.lastMessage.fileName && !chat.lastMessage.body
+            ? `📎 ${chat.lastMessage.fileName}`
+            : chat.lastMessage.body;
       const prefix = chat.type === "room" && chat.lastMessage.author !== "system" ? `${chat.lastMessage.author}: ` : "";
       return prefix + body.replace(/\s+/g, " ").slice(0, 90);
     }

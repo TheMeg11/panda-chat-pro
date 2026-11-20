@@ -7,6 +7,7 @@ import { logoutAction } from "@/app/actions/auth";
 import { Avatar, Logo } from "@/components/brand";
 import { useI18n } from "@/components/i18n-provider";
 import { tr } from "@/lib/i18n";
+import { APP_VERSION } from "@/lib/version";
 import { cn } from "@/lib/utils";
 
 export type NavTab = "chats" | "settings" | "profile";
@@ -32,7 +33,7 @@ export function SidebarHeader() {
       <div className="flex items-center justify-between">
         <Logo href="/dashboard" size={34} onDark />
         <span className="rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-bold text-white/70" dir="ltr">
-          v2.0
+          v{APP_VERSION.split(".").slice(0, 2).join(".")}
         </span>
       </div>
       <p className="mt-1 hidden ps-1 text-[11px] font-medium text-white/50 lg:block">{t.common.dashboard}</p>

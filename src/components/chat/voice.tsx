@@ -25,12 +25,24 @@ export function formatSecs(total: number): string {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 }
 
+export type MicError = "denied" | "busy" | "unsupported";
+
+/** Map a recorder/getUserMedia failure to a precise, honest message — a
+ * granted permission that still fails is NOT "permission denied". */
+function classifyMicError(err: unknown, precheckFailed: boolean): MicError {
+  const name = (err as DOMException | undefined)?.name ?? "";
+  if (name === "NotAllowedError" || name === "SecurityError") return "denied";
+  if (name === "NotReadableError" || name === "AbortError" || name === "TrackStartError") return "busy";
+  if (name === "NotFoundError" || name === "OverconstrainedError") return "unsupported";
+  return precheckFailed || name ? "unsupported" : "unsupported";
+}
+
 export function useVoiceRecorder() {
   const [phase, setPhase] = useState<VoicePhase>("idle");
   const [elapsed, setElapsed] = useState(0);
   const [duration, setDuration] = useState(0);
   const [url, setUrl] = useState<string | null>(null);
-  const [micError, setMicError] = useState(false);
+  const [micError, setMicError] = useState<MicError | null>(null);
   const recRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const chunksRef = useRef<Blob[]>([]);
@@ -50,10 +62,21 @@ export function useVoiceRecorder() {
   }, []);
 
   const start = useCallback(async () => {
-    setMicError(false);
+    setMicError(null);
+    const precheckFailed = !navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined";
     try {
-      if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") throw new Error("unsupported");
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      if (precheckFailed) throw new DOMException("recording unsupported", "NotSupportedError");
+      let stream: MediaStream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
+      } catch (err) {
+        // Some Android WebViews reject rich constraints — retry plain.
+        if ((err as DOMException)?.name === "OverconstrainedError" || (err as DOMException)?.name === "NotFoundError") {
+          stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        } else {
+          throw err;
+        }
+      }
       streamRef.current = stream;
       const mimeType = MIMES.find((m) => {
         try {
@@ -62,7 +85,14 @@ export function useVoiceRecorder() {
           return false;
         }
       });
-      const rec = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+      // Constructor with an exotic mime can throw on some builds — fall back
+      // to the browser default before giving up.
+      let rec: MediaRecorder;
+      try {
+        rec = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+      } catch {
+        rec = new MediaRecorder(stream);
+      }
       chunksRef.current = [];
       rec.ondataavailable = (e) => {
         if (e.data.size > 0) chunksRef.current.push(e.data);
@@ -79,16 +109,21 @@ export function useVoiceRecorder() {
         setDuration(Math.max(1, Math.round((Date.now() - startedRef.current) / 1000)));
         setPhase("review");
       };
-      rec.start(250);
+      try {
+        rec.start(250);
+      } catch {
+        rec.start();
+      }
       recRef.current = rec;
       startedRef.current = Date.now();
       setElapsed(0);
       setPhase("recording");
       clearTimer();
       timerRef.current = setInterval(() => setElapsed(Math.floor((Date.now() - startedRef.current) / 1000)), 250);
-    } catch {
+    } catch (err) {
       cleanupStream();
-      setMicError(true);
+      // Honest mapping: granted-but-failing is never reported as "denied".
+      setMicError(classifyMicError(err, precheckFailed));
       setPhase("idle");
     }
   }, [cleanupStream, clearTimer]);
