@@ -28,7 +28,12 @@ export async function storeFile(roomId: string, memberId: string | null, file: F
 
   const magic = sniffMime(buf);
   if (!magic) return { ok: false, error: "fileInvalid" };
-  const mime = INLINE_MIMES.has(magic) ? magic : "application/octet-stream";
+  // v2.3.0 — EBML containers are shared by WebM audio and video; the magic
+  // bytes cannot tell them apart. When the browser declared audio/*, store
+  // audio/webm so bubbles render <audio>/the voice chip instead of a tall
+  // <video> player. Safety is unchanged: audio/webm is inline-safe either way.
+  const magic2 = magic === "video/webm" && file.type.startsWith("audio/") ? "audio/webm" : magic;
+  const mime = INLINE_MIMES.has(magic2) ? magic2 : "application/octet-stream";
   const name = sanitizeFileName(file.name || "file");
 
   const [row] = await db

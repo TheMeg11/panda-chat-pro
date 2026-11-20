@@ -1655,6 +1655,12 @@ function FileBubble({ m, expired, onExpired }: { m: ChatMessage; expired: boolea
     );
   }
 
+  // v2.3.0 — voice chips render before the video branch too: audio-only WebM
+  // uploads were historically sniffed/stored as video/webm.
+  if (/^voice-/.test(file.name) && (file.mime.startsWith("audio/") || file.mime === "video/webm")) {
+    return <VoicePlayer src={url} seed={m.id} mine={m.mine} />;
+  }
+
   if (file.mime.startsWith("video/")) {
     return (
       <video
