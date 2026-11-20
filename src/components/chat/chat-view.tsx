@@ -1187,10 +1187,17 @@ export function ChatView({
               <FileTypeIcon mime={pendingFile.type} className="size-4 shrink-0 text-accent-ink" />
               <div className="min-w-0 flex-1">
                 <p className="truncate text-xs font-bold text-ink" dir="auto">
-                  {pendingFile.name}
+                  {pendingFile.name.startsWith("voice-") ? t.chat.voiceReady : pendingFile.name}
                 </p>
                 <p className="text-[11px] text-muted">
-                  {uploading ? t.chat.uploading : formatSize(pendingFile.size)}
+                  {uploading
+                    ? t.chat.uploading
+                    : pendingFile.name.startsWith("voice-")
+                      ? (() => {
+                          const m = pendingFile.name.match(/^voice-(\d+)s/);
+                          return m ? formatSecs(Number(m[1])) : t.chat.voiceReady;
+                        })()
+                      : formatSize(pendingFile.size)}
                 </p>
               </div>
               <button
