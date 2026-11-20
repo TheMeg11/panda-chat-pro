@@ -16,7 +16,10 @@ import {
   KeyRound,
   Lock,
   LockKeyhole,
+  Mic,
   Music,
+  RotateCcw,
+  Square,
   Paperclip,
   Plus,
   Search,
@@ -37,9 +40,10 @@ import { useI18n } from "@/components/i18n-provider";
 import { useHydrated } from "@/components/ui";
 import { EmojiPicker } from "@/components/chat/emoji-picker";
 import { GifPicker } from "@/components/chat/gif-picker";
+import { useVoiceRecorder, VoiceBars, VoicePlayer, formatSecs } from "@/components/chat/voice";
 import type { ChatMessage, ChatSnapshot } from "@/lib/chat";
 import { errorText, formatDate, formatNumber } from "@/lib/i18n";
-import { cn, fmt } from "@/lib/utils";
+import { cn, fmt, relative } from "@/lib/utils";
 import { useLocalFlag } from "@/lib/local-store";
 import {
   cacheUnlocked,
@@ -67,6 +71,9 @@ type Props = {
   onHeaderOpen?: () => void;
   /** v1.8.0 — DMs are peer-to-peer: no member is an "owner", no owner badge. */
   suppressOwnerBadge?: boolean;
+  /** v2.3.0 — fires on every snapshot with the peer's lastSeenAt (DMs) so the
+      profile panel can show a LIVE "online / last seen" line. */
+  onPeerSeen?: (iso: string | null) => void;
   /** v1.8.0 — peer avatar URL (Telegram-style header + incoming bubbles in DMs) */
   peerAvatarSrc?: string;
   /** v1.8.0 — true for user-to-user chats: swaps member/online counts for the last-seen line */
@@ -123,6 +130,7 @@ export function ChatView({
   headerActions,
   className,
   onHeaderOpen,
+  onPeerSeen,
   suppressOwnerBadge,
   peerAvatarSrc,
   directPeer,
@@ -146,6 +154,9 @@ export function ChatView({
   const [unseen, setUnseen] = useState(0);
   const [pendingFile, setPendingFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [retryable, setRetryable] = useState(false);
+  // v2.3.0 — Telegram-style voice recording (mic → stop/send/trash → send)
+  const voice = useVoiceRecorder();
   const [expiredFiles, setExpiredFiles] = useState<Set<string>>(new Set());
   const fileInputRef = useRef<HTMLInputElement>(null);
   /* ---- Swipe-to-reply (touch): tracks one gesture at a time ---- */
@@ -237,9 +248,11 @@ export function ChatView({
   const atBottomRef = useRef(true);
   const countRef = useRef(initial.messages.length);
 
-  const apply = useCallback((snap: ChatSnapshot) => {
+  const apply = useCallback(
+    (snap: ChatSnapshot) => {
     versionRef.current = snap.stateVersion;
     setRoom(snap.room);
+    if (snap.room.direct && onPeerSeen) onPeerSeen(snap.room.peerLastSeenAt ?? null);
     if (snap.reset) {
       setMessages(snap.messages);
       lastIdRef.current = lastId(snap.messages);
@@ -251,7 +264,9 @@ export function ChatView({
       });
       lastIdRef.current = Math.max(lastIdRef.current, lastId(snap.messages));
     }
-  }, []);
+    },
+    [onPeerSeen],
+  );
 
   /* Fetch E2EE key material for this conversation (DM only, session-scoped). */
   useEffect(() => {
@@ -334,7 +349,12 @@ export function ChatView({
         // hidden tabs must NOT clear unread flags — the notify runtime and the
         // chat-list unread dots rely on them.
         const read = document.visibilityState === "visible" ? "&read=1" : "";
-        const res = await fetch(`${endpoint}?after=${lastIdRef.current}&v=${versionRef.current}${read}`, { cache: "no-store" });
+        // v2.3.0 — weak networks: a hung request must not freeze the poll
+        // cycle; abort after 12s so the next tick retries promptly.
+        const res = await fetch(`${endpoint}?after=${lastIdRef.current}&v=${versionRef.current}${read}`, {
+          cache: "no-store",
+          signal: AbortSignal.timeout(12_000),
+        });
         if ([401, 403, 404, 503].includes(res.status)) {
           const data = (await res.json().catch(() => ({}))) as { error?: string };
           stopped = true;
@@ -399,9 +419,11 @@ export function ChatView({
     if (near) setUnseen(0);
   };
 
-  const send = async () => {
+  const send = async (voiceOverride?: File) => {
     const rawBody = draft.trim();
-    if ((!rawBody && !pendingFile) || sending) return;
+    const file = voiceOverride ?? pendingFile;
+    if ((!rawBody && !file) || sending) return;
+    setRetryable(false);
     if (rawBody.length > maxLength) return setError("messageTooLong");
     setSending(true);
     setError(null);
@@ -418,21 +440,21 @@ export function ChatView({
       let fileIv: string | null = null;
       let fileName: string | null = null;
       let fileMime: string | null = null;
-      if (pendingFile) {
+      if (file) {
         setUploading(true);
-        let uploadBlob: Blob = pendingFile;
+        let uploadBlob: Blob = file;
         if (unlocked) {
           // Encrypt the file bytes with the conversation key; metadata travels
           // inside the encrypted message body, never in the clear.
-          const enc = await encryptFile(unlocked.privateKey, unlocked.peerPublicKeyJwk, roomId, await pendingFile.arrayBuffer());
+          const enc = await encryptFile(unlocked.privateKey, unlocked.peerPublicKeyJwk, roomId, await file.arrayBuffer());
           uploadBlob = enc.blob;
           fileIv = enc.iv;
         }
-        fileName = pendingFile.name;
-        fileMime = pendingFile.type || "application/octet-stream";
+        fileName = file.name;
+        fileMime = file.type || "application/octet-stream";
         const form = new FormData();
-        form.append("file", new File([uploadBlob], unlocked ? "encrypted.bin" : pendingFile.name, { type: unlocked ? "application/octet-stream" : pendingFile.type }));
-        const upRes = await fetch(endpoint.replace(/\/messages$/, "/files"), { method: "POST", body: form });
+        form.append("file", new File([uploadBlob], unlocked ? "encrypted.bin" : file.name, { type: unlocked ? "application/octet-stream" : file.type }));
+        const upRes = await fetch(endpoint.replace(/\/messages$/, "/files"), { method: "POST", body: form, signal: AbortSignal.timeout(30_000) });
         const upData = (await upRes.json().catch(() => ({}))) as { id?: string; error?: string };
         if (!upRes.ok || !upData.id) {
           setError(upData.error ?? "uploadFailed");
@@ -450,6 +472,9 @@ export function ChatView({
       const res = await fetch(endpoint, {
         method: "POST",
         headers: { "content-type": "application/json" },
+        // v2.3.0 — weak networks: bound the request so the user gets a retry
+        // affordance instead of a spinner that never resolves.
+        signal: AbortSignal.timeout(20_000),
         body: JSON.stringify({ body, fileId, replyToId: replyTo?.id ?? null, after: lastIdRef.current, v: versionRef.current, ...(ttl !== undefined ? { ttl } : {}) }),
       });
       const data = (await res.json().catch(() => ({}))) as ChatSnapshot & { error?: string };
@@ -468,7 +493,10 @@ export function ChatView({
       atBottomRef.current = true;
       apply(data);
     } catch {
+      // v2.3.0 — network failure keeps draft + attachment intact and offers
+      // an explicit "retry" affordance in the composer footer.
       setError("network");
+      setRetryable(true);
     } finally {
       setSending(false);
       setUploading(false);
@@ -482,6 +510,16 @@ export function ChatView({
    * guests and E2EE rooms, so the trigger is gated to authenticated members
    * of non-E2EE conversations (see the composer).
    */
+  /** Finalize the recording and hand it to the normal send path (also stored
+      in pendingFile so the retry affordance works on weak networks). */
+  const sendVoice = () => {
+    const f = voice.take();
+    if (!f) return;
+    voice.discard();
+    setPendingFile(f);
+    void send(f);
+  };
+
   const sendGif = async (gifId: string) => {
     if (sending) return;
     setSending(true);
@@ -506,7 +544,10 @@ export function ChatView({
       atBottomRef.current = true;
       apply(data);
     } catch {
+      // v2.3.0 — network failure keeps draft + attachment intact and offers
+      // an explicit "retry" affordance in the composer footer.
       setError("network");
+      setRetryable(true);
     } finally {
       setSending(false);
       requestAnimationFrame(() => inputRef.current?.focus());
@@ -729,7 +770,26 @@ export function ChatView({
                 <h1 className="truncate text-[0.98rem] font-extrabold text-ink" dir="auto">
                   {room.name}
                 </h1>
-                {room.subtitle ? (
+                {room.direct ? (
+                  /* v2.3.0 — live presence: the snapshot carries the peer's
+                     lastSeenAt on every poll, so this flips to "online" the
+                     moment they open the chat (the old header froze the @username
+                     from page load and never showed presence). */
+                  (() => {
+                    const seen = room.peerLastSeenAt;
+                    const online = Boolean(seen) && Date.now() - new Date(seen!).getTime() < 90_000;
+                    return (
+                      <p className={cn("flex items-center gap-1.5 text-xs font-semibold", online ? "text-[#2ea36f]" : "text-muted")}>
+                        <span className={cn("size-1.5 rounded-full", online ? "bg-[#4cc79a]" : "bg-faint")} aria-hidden="true" />
+                        {online
+                          ? t.dm.lastSeenOnline
+                          : seen
+                            ? fmt(t.dm.lastSeenAt, { time: relative(seen, lang) })
+                            : t.dm.lastSeenRecently}
+                      </p>
+                    );
+                  })()
+                ) : room.subtitle ? (
                   <p className="truncate text-xs text-muted" dir="ltr">
                     {room.subtitle}
                   </p>
@@ -1204,7 +1264,7 @@ export function ChatView({
               {/* ---- v1.8.0 mobile composer: ONE "+" button instead of the
                  emoji/attach/GIF/TTL row that crowded phones. Telegram-style
                  bottom sheet carries the extras; desktop keeps the old bar. ---- */}
-              <div className="relative shrink-0 md:hidden">
+              <div className={cn("relative shrink-0 md:hidden", voice.phase !== "idle" && "hidden")}>
                 <button
                   type="button"
                   onClick={() => setSheetOpen((v) => !v)}
@@ -1268,6 +1328,8 @@ export function ChatView({
               </div>
               {/* Emoji — desktop trigger (mobile uses the "+" sheet). The
                   single controlled picker instance renders further down. */}
+              {voice.phase === "idle" ? (
+              <>
               <button
                 type="button"
                 onClick={() => setEmojiOpen((v) => !v)}
@@ -1288,8 +1350,10 @@ export function ChatView({
               >
                 <Paperclip className="size-[18px]" />
               </button>
+              </>
+              ) : null}
               {/* GIFs: authenticated members of non-E2EE rooms only (API-side rule mirrored here). */}
-              {me.role !== "guest" && !room.e2eeEnabled ? (
+              {me.role !== "guest" && !room.e2eeEnabled && voice.phase === "idle" ? (
                 <button
                   type="button"
                   onClick={() => setGifOpen((v) => !v)}
@@ -1308,6 +1372,7 @@ export function ChatView({
               {me.role !== "guest" && !room.e2eeEnabled ? (
                 <GifPicker onPick={(gifId) => void sendGif(gifId)} disabled={sending} open={gifOpen} onOpenChange={setGifOpen} />
               ) : null}
+              {voice.phase === "idle" ? (
               <select
                 value={ttlChoice}
                 onChange={(e) => setTtlChoice(e.target.value)}
@@ -1322,41 +1387,135 @@ export function ChatView({
                 <option value="86400">{t.selfdestruct.oneDay}</option>
                 <option value="604800">{t.selfdestruct.oneWeek}</option>
               </select>
-              <textarea
-                ref={inputRef}
-                rows={1}
-                dir="auto"
-                value={draft}
-                maxLength={maxLength}
-                onChange={(e) => {
-                  setDraft(e.target.value);
-                  if (error) setError(null);
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
-                    e.preventDefault();
-                    void send();
-                  }
-                }}
-                placeholder={t.chat.placeholder}
-                aria-label={t.chat.placeholder}
-                className="max-h-42 min-h-10 flex-1 resize-none bg-transparent py-2 text-[0.95rem] leading-6 text-ink outline-none placeholder:text-faint"
-              />
-              <button
-                type="submit"
-                disabled={(!draft.trim() && !pendingFile) || sending}
-                className="btn btn-primary btn-icon size-10 shrink-0 rounded-xl"
-                aria-label={t.chat.send}
-                title={t.chat.send}
-              >
-                {sending ? <span className="spinner" aria-hidden="true" /> : <SendHorizontal className="size-[18px] rtl:-scale-x-100" />}
-              </button>
+              ) : null}
+              {voice.phase === "recording" ? (
+                <div className="flex min-h-10 flex-1 items-center gap-2 px-1">
+                  <span className="rec-pulse size-2.5 shrink-0 rounded-full bg-rose-ink" aria-hidden="true" />
+                  <span className="text-sm font-bold tabular-nums text-rose-ink" dir="ltr">
+                    {formatSecs(voice.elapsed)}
+                  </span>
+                  <VoiceBars seed={17} recording className="text-rose-ink/50" />
+                  <span className="hidden shrink-0 text-[11px] text-faint sm:inline">{t.chat.recording}</span>
+                </div>
+              ) : voice.phase === "review" ? (
+                <div className="flex min-h-10 flex-1 items-center gap-2 px-1">
+                  <span className="grid size-9 shrink-0 place-items-center rounded-full bg-accent-soft text-accent-ink">
+                    <Mic className="size-4" />
+                  </span>
+                  <div className="min-w-0 flex-1 leading-tight">
+                    <p className="truncate text-xs font-bold text-ink">{t.chat.voiceReady}</p>
+                    <p className="text-[11px] text-muted tabular-nums" dir="ltr">
+                      {formatSecs(voice.duration)}
+                    </p>
+                  </div>
+                  <VoiceBars seed={29} progress={100} className="hidden w-28 text-accent-ink sm:flex" />
+                </div>
+              ) : (
+                <textarea
+                  ref={inputRef}
+                  rows={1}
+                  dir="auto"
+                  value={draft}
+                  maxLength={maxLength}
+                  onChange={(e) => {
+                    setDraft(e.target.value);
+                    if (error) setError(null);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+                      e.preventDefault();
+                      void send();
+                    }
+                  }}
+                  placeholder={t.chat.placeholder}
+                  aria-label={t.chat.placeholder}
+                  className="max-h-42 min-h-10 flex-1 resize-none bg-transparent py-2 text-[0.95rem] leading-6 text-ink outline-none placeholder:text-faint"
+                />
+              )}
+              {voice.phase !== "idle" ? (
+                <>
+                  {/* stop (keeps the clip for review) — trash while reviewing */}
+                  {voice.phase === "review" ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        voice.discard();
+                        void voice.start();
+                      }}
+                      disabled={sending}
+                      className="btn btn-ghost btn-icon size-10 shrink-0 rounded-xl"
+                      aria-label={t.chat.reRecord}
+                      title={t.chat.reRecord}
+                    >
+                      <RotateCcw className="size-[18px]" />
+                    </button>
+                  ) : null}
+                  <button
+                    type="button"
+                    onClick={() => (voice.phase === "recording" ? voice.stop() : voice.discard())}
+                    className="btn btn-ghost btn-icon size-10 shrink-0 rounded-xl text-muted hover:text-rose-ink"
+                    aria-label={voice.phase === "recording" ? t.chat.stopRec : t.common.cancel}
+                    title={voice.phase === "recording" ? t.chat.stopRec : t.common.cancel}
+                  >
+                    {voice.phase === "recording" ? <Square className="size-4" /> : <Trash2 className="size-[18px]" />}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={sendVoice}
+                    disabled={sending}
+                    className="btn btn-primary btn-icon size-10 shrink-0 rounded-xl"
+                    aria-label={t.chat.send}
+                    title={t.chat.send}
+                  >
+                    {sending ? <span className="spinner" aria-hidden="true" /> : <SendHorizontal className="size-[18px] rtl:-scale-x-100" />}
+                  </button>
+                </>
+              ) : (draft.trim() || pendingFile) ? (
+                <button
+                  type="submit"
+                  disabled={sending}
+                  className="btn btn-primary btn-icon size-10 shrink-0 rounded-xl"
+                  aria-label={t.chat.send}
+                  title={t.chat.send}
+                >
+                  {sending ? <span className="spinner" aria-hidden="true" /> : <SendHorizontal className="size-[18px] rtl:-scale-x-100" />}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => void voice.start()}
+                  disabled={composerLocked || sending}
+                  className="btn btn-primary btn-icon size-10 shrink-0 rounded-xl"
+                  aria-label={t.chat.micRecord}
+                  title={t.chat.micRecord}
+                >
+                  <Mic className="size-[18px]" />
+                </button>
+              )}
             </form>
           )}
           <div className="mt-1.5 flex min-h-4 items-center justify-between gap-3 px-1 text-[11px] text-faint">
             <span className="hidden sm:inline">{composerLocked ? "" : t.chat.sendHint}</span>
-            {error ? (
-              <span className="font-semibold text-rose-ink">{errorText(t, error)}</span>
+            {voice.micError ? (
+              <span className="font-semibold text-rose-ink">{t.chat.micDenied}</span>
+            ) : error ? (
+              <span className="flex items-center gap-2">
+                <span className="font-semibold text-rose-ink">{errorText(t, error)}</span>
+                {retryable ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setRetryable(false);
+                      setError(null);
+                      void send();
+                    }}
+                    className="btn btn-soft btn-sm h-6 px-2 text-[11px]"
+                  >
+                    <RotateCcw className="size-3" />
+                    {t.chat.retry}
+                  </button>
+                ) : null}
+              </span>
             ) : remaining < 200 ? (
               <span>{fmt(t.chat.charsLeft, { n: formatNumber(remaining, lang) })}</span>
             ) : null}
@@ -1502,6 +1661,9 @@ function FileBubble({ m, expired, onExpired }: { m: ChatMessage; expired: boolea
   }
 
   if (file.mime.startsWith("audio/")) {
+    // v2.3.0 — voice messages render as a Telegram-style chip; other audio
+    // keeps the native player.
+    if (/^voice-/.test(file.name)) return <VoicePlayer src={url} seed={m.id} mine={m.mine} />;
     return <audio src={url} controls preload="metadata" onError={onExpired} className="mb-1 w-64 max-w-full" />;
   }
 

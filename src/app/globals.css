@@ -38,6 +38,7 @@
   --rose: #fbcfd9;
   --rose-soft: #fdeef1;
   --rose-ink: #e5484d;
+  --ease-soft: cubic-bezier(0.22, 1, 0.36, 1);
   --amber-soft: #fef5e4;
   --amber-ink: #b45309;
   --ring: rgb(91 59 255 / 0.24);
@@ -795,11 +796,17 @@
     border-inline-end-color: transparent;
     animation: pc-spin 0.7s linear infinite;
   }
+  /* v2.3.0 — one soft, overshoot-free easing for every entrance; slightly
+     slower than before so motion reads as calm rather than snappy-jerky. */
   .fade-up {
-    animation: pc-fade-up 0.55s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+    animation: pc-fade-up 0.42s var(--ease-soft) both;
   }
   .pop-in {
-    animation: pc-pop 0.22s ease-out both;
+    animation: pc-pop 0.3s var(--ease-soft) both;
+  }
+  /* Voice recording indicator (v2.3.0): soft breathing dot. */
+  .rec-pulse {
+    animation: pc-rec-pulse 1.6s var(--ease-soft) infinite;
   }
   /* Hide scrollbars (emoji/gif picker grids) while keeping them scrollable. */
   .no-scrollbar {
@@ -837,7 +844,7 @@
 @keyframes pc-fade-up {
   from {
     opacity: 0;
-    transform: translateY(10px);
+    transform: translateY(8px);
   }
   to {
     opacity: 1;
@@ -847,11 +854,22 @@
 @keyframes pc-pop {
   from {
     opacity: 0;
-    transform: translateY(4px) scale(0.985);
+    transform: translateY(6px) scale(0.98);
   }
   to {
     opacity: 1;
     transform: none;
+  }
+}
+@keyframes pc-rec-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.55;
+    transform: scale(0.82);
   }
 }
 @keyframes pc-float {
@@ -900,6 +918,7 @@
   .pop-in,
   .float-slow,
   .anim-float,
+  .rec-pulse,
   .live-dot::after {
     animation: none;
   }

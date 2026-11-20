@@ -48,3 +48,14 @@ export function pastelFor(seed: string): [string, string] {
 export function shortId(id: string): string {
   return id.replace(/-/g, "").slice(0, 6);
 }
+
+/** Minimal relative formatter for last-seen lines (mirrors LocalTime). v2.3.0 moved here from chat-menu so the live DM presence line can use it too. */
+export function relative(iso: string, lang: "fa" | "en"): string {
+  const diff = Date.now() - new Date(iso).getTime();
+  const rtf = new Intl.RelativeTimeFormat(lang === "fa" ? "fa-IR" : "en", { numeric: "auto" });
+  const minutes = Math.round(diff / 60_000);
+  if (minutes < 60) return rtf.format(-Math.max(1, minutes), "minute");
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return rtf.format(-hours, "hour");
+  return rtf.format(-Math.round(hours / 24), "day");
+}

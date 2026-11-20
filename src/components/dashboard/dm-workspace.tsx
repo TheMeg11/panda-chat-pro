@@ -41,6 +41,9 @@ type Props = {
  * account links. The privacy sheet (E2EE + self-destruct) stays a modal.
  */
 export function DmWorkspace({ roomId, peer, blocked, snapshot, maxLength, e2ee }: Props) {
+  // v2.3.0 — live peer presence threaded from the chat snapshot (the SSR
+  // value is frozen at page load; this keeps the profile panel current).
+  const [liveSeen, setLiveSeen] = useState<string | null>(null);
   const { t } = useI18n();
   const [profileOpen, setProfileOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -74,6 +77,7 @@ export function DmWorkspace({ roomId, peer, blocked, snapshot, maxLength, e2ee }
   return (
     <>
       <ChatView
+        onPeerSeen={(iso) => setLiveSeen(iso)}
         endpoint={`/api/rooms/${roomId}/messages`}
         initial={dmSnapshot}
         maxLength={maxLength}
@@ -95,7 +99,7 @@ export function DmWorkspace({ roomId, peer, blocked, snapshot, maxLength, e2ee }
         roomId={roomId}
         open={profileOpen}
         onClose={() => setProfileOpen(false)}
-        peer={{ displayName: peer.displayName, username: peer.username || null, bio: peer.bio ?? null, lastSeenAt: peer.lastSeenAt }}
+        peer={{ displayName: peer.displayName, username: peer.username || null, bio: peer.bio ?? null, lastSeenAt: liveSeen ?? peer.lastSeenAt }}
         avatarSrc={peer.avatarSrc}
         blocked={blocked}
         onOpenPrivacy={() => setSettingsOpen(true)}

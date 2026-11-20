@@ -93,6 +93,8 @@ export type ChatRoomInfo = {
   subtitle?: string;
   /** true for 1:1 chats — renders round avatars and hides member/online counts */
   direct?: boolean;
+  /** v2.3.0 — DM only: the peer's last activity (live presence line in the header) */
+  peerLastSeenAt?: string | null;
 };
 
 export type Viewer = { memberId: string; nickname: string; role: "owner" | "guest"; /** dashboard viewers mark conversations read even as a joined guest */ markRead?: boolean };
@@ -165,6 +167,20 @@ export async function buildSnapshot(
     .from(roomMembers)
     .where(and(eq(roomMembers.roomId, room.id), eq(roomMembers.status, "active"), isNotNull(roomMembers.nickname)));
 
+  // v2.3.0 — DMs carry the peer's lastSeenAt in EVERY snapshot, so the header
+  // presence line ("online" / "last seen …") stays live across polling instead
+  // of being frozen at page load (the reported broken online display).
+  let peerLastSeenAt: string | null | undefined;
+  if (room.type === "dm") {
+    const [peer] = await db
+      .select({ lastSeenAt: roomMembers.lastSeenAt })
+      .from(roomMembers)
+      .where(and(eq(roomMembers.roomId, room.id), isNotNull(roomMembers.userId), ne(roomMembers.id, viewer.memberId)))
+      .orderBy(desc(roomMembers.lastSeenAt))
+      .limit(1);
+    peerLastSeenAt = peer?.lastSeenAt ? peer.lastSeenAt.toISOString() : null;
+  }
+
   return {
     messages: rows.map((r) => serialize(r, viewer, replies)),
     stateVersion: room.stateVersion,
@@ -179,6 +195,7 @@ export async function buildSnapshot(
       onlineCount: counts?.online ?? 0,
       e2eeEnabled: room.e2eeEnabled,
       defaultTtl: room.defaultTtl ?? null,
+      ...(peerLastSeenAt !== undefined ? { peerLastSeenAt } : {}),
       ...(roomOverride ?? {}),
     },
     me: viewer,

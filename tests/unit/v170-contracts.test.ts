@@ -31,9 +31,40 @@ describe("v1.6.0 contracts", () => {
     expect(privacy).not.toContain("localStorage");
   });
 
+  it("v2.3.0: voice messages — recorder, composer mic flow, player + upload path", () => {
+    const voice = readFileSync(new URL("../../src/components/chat/voice.tsx", import.meta.url), "utf8");
+    expect(voice).toContain("MediaRecorder");
+    expect(voice).toContain("getUserMedia");
+    expect(voice).toContain("VoicePlayer");
+    expect(voice).toContain("Infinity"); // WebM duration probe workaround
+    const view = readFileSync(new URL("../../src/components/chat/chat-view.tsx", import.meta.url), "utf8");
+    expect(view).toContain("useVoiceRecorder");
+    expect(view).toContain("sendVoice");
+    expect(view).toContain("t.chat.micRecord");
+    // voice rides the regular attachment upload — file bubble routes voice-*.webm
+    expect(view).toContain("/^voice-/");
+  });
+
+  it("v2.3.0: live DM presence + weak-network resilience", () => {
+    const chat = readFileSync(new URL("../../src/lib/chat.ts", import.meta.url), "utf8");
+    expect(chat).toContain("peerLastSeenAt");
+    expect(chat).toContain("45 seconds");
+    const view = readFileSync(new URL("../../src/components/chat/chat-view.tsx", import.meta.url), "utf8");
+    expect(view).toContain("t.dm.lastSeenOnline");
+    expect(view).toContain("AbortSignal.timeout");
+    expect(view).toContain("setRetryable");
+    const list = readFileSync(new URL("../../src/components/dashboard/chat-list.tsx", import.meta.url), "utf8");
+    expect(list).toContain("AbortSignal.timeout(10_000)");
+    // the dmCreated marker never reads as a preview anywhere
+    const rooms = readFileSync(new URL("../../src/lib/rooms.ts", import.meta.url), "utf8");
+    expect(rooms).toContain('body === "dmCreated"');
+  });
+
   it("service worker: new cache version + notification click routing", () => {
     const sw = readFileSync(new URL("../../public/sw.js", import.meta.url), "utf8");
-    expect(sw).toContain("pc-static-v5");
+    // v2.3.0 — cache bumped to v6 so stale PWA bundles (users still seeing
+    // pre-2.2 UI, e.g. the old "dmCreated" preview) refresh automatically.
+    expect(sw).toContain("pc-static-v6");
     expect(sw).toContain("notificationclick");
     expect(sw).toContain("openWindow");
   });

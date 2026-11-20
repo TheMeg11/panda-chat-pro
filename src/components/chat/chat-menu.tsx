@@ -35,7 +35,7 @@ import { useI18n } from "@/components/i18n-provider";
 import { hideChatAction } from "@/app/actions/vault";
 import { ActionForm, LangToggle, SubmitButton, ThemeToggle } from "@/components/ui";
 import { errorText } from "@/lib/i18n";
-import { cn, fmt } from "@/lib/utils";
+import { cn, fmt, relative } from "@/lib/utils";
 
 export type ChatHamburgerMenuProps = {
   roomId: string;
@@ -285,17 +285,6 @@ export function DmProfilePanel({ roomId, open, onClose, peer, avatarSrc, blocked
       ) : null}
     </>
   );
-}
-
-/** Minimal relative formatter for the last-seen line (mirrors LocalTime). */
-function relative(iso: string, lang: "fa" | "en"): string {
-  const diff = Date.now() - new Date(iso).getTime();
-  const rtf = new Intl.RelativeTimeFormat(lang === "fa" ? "fa-IR" : "en", { numeric: "auto" });
-  const minutes = Math.round(diff / 60_000);
-  if (minutes < 60) return rtf.format(-Math.max(1, minutes), "minute");
-  const hours = Math.round(minutes / 60);
-  if (hours < 24) return rtf.format(-hours, "hour");
-  return rtf.format(-Math.round(hours / 24), "day");
 }
 
 /** Room info for rooms the viewer JOINED — read-only profile + the shared menu. */

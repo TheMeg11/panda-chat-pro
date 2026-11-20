@@ -483,6 +483,10 @@ export async function listDashboardChats(
     // A GIF message carries no text — preview it as "GIF" (plain latin) so the
     // chat list and notification snippets show something instead of empty.
     const body = row.gif_id && !row.body ? "GIF" : row.body;
+    // v2.3.0 — the DM-creation system marker never reads as "last message"
+    // (fresh DMs used to show a raw "dmCreated" preview). Leaving the room out
+    // of lastMap falls back to the "Private conversation" placeholder.
+    if (row.author_name === "system" && body === "dmCreated") continue;
     // E2EE room, or an envelope that predates/lags the room flag → placeholder.
     if (e2eeRoomIds.has(row.room_id) || body.startsWith("e2ee.v1.")) {
       lastMap.set(row.room_id, { author: row.author_name, body: E2EE_PREVIEW, fileName: null });

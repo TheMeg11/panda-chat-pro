@@ -9,6 +9,7 @@ import {
   MessageCirclePlus,
   Search,
   SquarePen,
+  WifiOff,
   X,
 } from "lucide-react";
 import { startDmAction } from "@/app/actions/dm";
@@ -56,6 +57,10 @@ export function ChatListPanel({ chats: initialChats, user, roomLimit, totalRooms
   const [totalRooms, setTotalRooms] = useState(initialTotal);
   const [loaded, setLoaded] = useState(false);
   const [unread, setUnread] = useState(0);
+  // v2.3.0 — weak networks: after two failed syncs in a row, say so instead of
+  // silently showing stale data (the list itself is kept as-is).
+  const failsRef = useRef(0);
+  const [connLost, setConnLost] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const tickRef = useRef(0);
 
@@ -70,15 +75,21 @@ export function ChatListPanel({ chats: initialChats, user, roomLimit, totalRooms
       if (cancelled || busy) return;
       busy = true;
       try {
-        const res = await fetch("/api/chats", { cache: "no-store" });
+        // v2.3.0 — bound the request: a hung connection must not block the
+        // polling cycle (busy stays true until fetch settles).
+        const res = await fetch("/api/chats", { cache: "no-store", signal: AbortSignal.timeout(10_000) });
         if (!res.ok) return;
         const data = (await res.json()) as { chats: DashboardChat[]; totalRooms: number };
         if (cancelled) return;
         setChats(data.chats ?? []);
         setTotalRooms(data.totalRooms ?? 0);
         setUnread((data.chats ?? []).filter((c) => c.hasUnread).length);
+        failsRef.current = 0;
+        setConnLost(false);
       } catch {
-        /* offline — keep whatever we have */
+        /* offline — keep whatever we have, but surface the state */
+        failsRef.current += 1;
+        if (failsRef.current >= 2) setConnLost(true);
       } finally {
         if (!cancelled) setLoaded(true);
         busy = false;
@@ -234,6 +245,14 @@ export function ChatListPanel({ chats: initialChats, user, roomLimit, totalRooms
               </ActionForm>
             </div>
           )}
+        </div>
+      ) : null}
+
+      {/* v2.3.0 — weak-connection banner (kept data stays visible beneath it) */}
+      {connLost ? (
+        <div className="shrink-0 border-b border-line bg-amber-soft/70 px-4 py-2 text-center text-xs font-semibold text-amber-ink">
+          <WifiOff className="me-1.5 inline size-3.5 align-[-3px]" />
+          {t.chat.reconnecting}
         </div>
       ) : null}
 
