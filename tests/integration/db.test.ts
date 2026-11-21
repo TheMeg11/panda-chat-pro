@@ -52,10 +52,13 @@ describe.skipIf(!hasDb)("database integration (schema + migrations)", () => {
     expect(msgNames.has("expires_at")).toBe(true);
     expect(msgNames.has("encrypted")).toBe(true);
 
-    const linkCols = await client.query(`select column_name from information_schema.columns where table_name = 'telegram_links'`);
-    const linkNames = new Set(linkCols.rows.map((r: { column_name: string }) => r.column_name));
-    expect(linkNames.has("fallback_room_id")).toBe(true);
-    expect(linkNames.has("allow_bot_dm")).toBe(true);
+    // v2.6.0 — the Telegram integration is gone: its tables must NOT exist.
+    const tgTables = await client.query(
+      `select table_name from information_schema.tables where table_schema = 'public' and table_name in ('telegram_links', 'telegram_bots', 'telegram_link_codes', 'password_resets')`,
+    );
+    expect(tgTables.rows).toHaveLength(0);
+    const userCols = await client.query(`select column_name from information_schema.columns where table_name = 'users'`);
+    expect(new Set(userCols.rows.map((r: { column_name: string }) => r.column_name)).has("can_use_telegram")).toBe(false);
     await client.end();
   });
 

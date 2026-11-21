@@ -7,9 +7,6 @@ export type PlatformSettings = {
   announcement: string;
   defaultMaxRooms: number;
   maxMessageLength: number;
-  telegramEnabled: boolean;
-  /** when true, linking the Telegram bot requires the admin-granted access (paid mode) */
-  telegramPaid: boolean;
   publicUrl: string;
 };
 
@@ -19,8 +16,6 @@ export const DEFAULT_SETTINGS: PlatformSettings = {
   announcement: "",
   defaultMaxRooms: 20,
   maxMessageLength: 2000,
-  telegramEnabled: true,
-  telegramPaid: true,
   publicUrl: "",
 };
 

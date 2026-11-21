@@ -3,7 +3,7 @@ import Form from "next/form";
 import { Search } from "lucide-react";
 import { and, desc, eq, ilike, isNotNull, or, type SQL } from "drizzle-orm";
 import { db } from "@/db";
-import { rooms, telegramLinks, users } from "@/db/schema";
+import { rooms, users } from "@/db/schema";
 import { EmptyRow, PageHeader, TableWrap } from "@/components/admin/parts";
 import { Avatar } from "@/components/brand";
 import { LocalTime } from "@/components/ui";
@@ -36,13 +36,11 @@ export default async function AdminRooms({
   if (f === "protected") conditions.push(isNotNull(rooms.passwordHash));
   if (f === "locked") conditions.push(eq(rooms.isLocked, true));
   if (f === "disabled") conditions.push(eq(rooms.isDisabled, true));
-  if (f === "bots") conditions.push(isNotNull(telegramLinks.userId));
 
   const list = await db
-    .select({ room: rooms, owner: users.username, ownerId: users.id, tgChat: telegramLinks.chatName })
+    .select({ room: rooms, owner: users.username, ownerId: users.id })
     .from(rooms)
     .innerJoin(users, eq(users.id, rooms.ownerId))
-    .leftJoin(telegramLinks, eq(telegramLinks.userId, rooms.ownerId))
     .where(conditions.length ? and(...conditions) : undefined)
     .orderBy(desc(rooms.lastActivityAt))
     .limit(200);
@@ -52,7 +50,6 @@ export default async function AdminRooms({
     ["protected", t.admin.filterProtected],
     ["locked", t.admin.filterLocked],
     ["disabled", t.admin.filterDisabled],
-    ["bots", t.admin.filterBots],
   ];
   const filterHref = (key: string) => {
     const sp = new URLSearchParams();
@@ -98,7 +95,7 @@ export default async function AdminRooms({
             </thead>
             <tbody>
               {list.length === 0 ? <EmptyRow colSpan={7} text={t.admin.empty} /> : null}
-              {list.map(({ room, owner, ownerId, tgChat }) => {
+              {list.map(({ room, owner, ownerId }) => {
                 const c = counters.get(room.id) ?? { members: 0, messages: 0 };
                 return (
                   <tr key={room.id}>
@@ -123,7 +120,6 @@ export default async function AdminRooms({
                         {room.isLocked ? <span className="badge badge-amber">{t.admin.filterLocked}</span> : null}
                         {room.isDisabled ? <span className="badge badge-rose">{t.admin.filterDisabled}</span> : null}
                         {room.type === "dm" ? <span className="badge badge-mint">{t.admin.dmBadge}</span> : null}
-                        {tgChat ? <span className="badge badge-sky">✈ {t.admin.filterTelegram}</span> : null}
                       </div>
                     </td>
                     <td className="whitespace-nowrap text-muted">

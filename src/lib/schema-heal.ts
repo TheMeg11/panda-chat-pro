@@ -14,8 +14,8 @@ import { db } from "@/db";
  * "platform_settings" does not exist` and /api/health answered 503
  * schema-missing — a freshly re-created Postgres had wiped the tables too.
  *
- * Defensive fix: on every server boot, BEFORE the poller/maintenance loops
- * start, check that the base schema exists (platform_settings is created by
+ * Defensive fix: on every server boot, BEFORE the maintenance loop
+ * starts, check that the base schema exists (platform_settings is created by
  * init.sql and never dropped). If it is missing, apply sql/init.sql (fully
  * idempotent: CREATE TABLE IF NOT EXISTS / ADD COLUMN IF NOT EXISTS) and then
  * the incremental migrations from scripts/db-migrate.mjs. This makes the app

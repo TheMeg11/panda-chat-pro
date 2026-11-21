@@ -15,7 +15,6 @@ export async function AuthShell({ title, subtitle, children }: { title: string; 
   const points: Array<[LucideIcon, string]> = [
     [ShieldCheck, t.auth.asidePoint1],
     [Lock, t.auth.asidePoint2],
-    [Zap, t.auth.asidePoint3],
   ];
   return (
     <div className="grid min-h-dvh lg:grid-cols-[1.05fr_1fr]">

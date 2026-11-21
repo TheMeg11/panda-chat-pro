@@ -88,27 +88,10 @@ export const MIGRATIONS = [
      username varchar(32) not null,
      deleted_at timestamptz not null default now()
    )`,
-  `alter table telegram_links add column if not exists fallback_room_id uuid references rooms(id) on delete set null`,
-  `alter table telegram_links add column if not exists allow_bot_dm boolean not null default false`,
-  // ---- v1.5.0 (profile, unread, offline notify, GIFs, password reset) ----
+  // ---- v1.5.0 (profile, unread, GIFs) ----
   `alter table users add column if not exists bio varchar(280)`,
-  `create table if not exists password_resets (
-     id uuid primary key default gen_random_uuid(),
-     user_id uuid not null references users(id) on delete cascade,
-     code_hash text not null,
-     expires_at timestamptz not null,
-     used_at timestamptz,
-     attempts integer not null default 0,
-     created_at timestamptz not null default now()
-   )`,
-  `create index if not exists password_resets_user_idx on password_resets (user_id)`,
   `alter table room_members add column if not exists last_read_at timestamptz`,
-  `alter table room_members add column if not exists tg_notified_at timestamptz`,
   `alter table messages add column if not exists gif_id varchar(64)`,
-  `alter table telegram_links add column if not exists offline_notify boolean not null default false`,
-  `alter table telegram_links alter column offline_notify set default true`,
-  `alter table telegram_links add column if not exists announce_enabled boolean not null default true`,
-  `alter table telegram_links add column if not exists announced_at timestamptz`,
   `create table if not exists user_avatars (
      user_id uuid primary key references users(id) on delete cascade,
      mime varchar(32) not null,
@@ -123,6 +106,20 @@ export const MIGRATIONS = [
      created_at timestamptz not null default now()
    )`,
   `create unique index if not exists user_blocks_pair_idx on user_blocks (blocker_id, blocked_id)`,
+  // ---- v2.6.0 — Telegram integration fully removed (web-only chat) ----
+  // Dead tables and columns are DROPPED: the bot, its links, the telegram
+  // 6-digit password-reset flow and the offline-notify sweep are gone.
+  `drop table if exists telegram_link_codes`,
+  `drop table if exists telegram_links`,
+  `drop table if exists telegram_bots`,
+  `drop table if exists password_resets`,
+  `drop index if exists messages_tg_idx`,
+  `alter table messages drop column if exists tg_message_id`,
+  `alter table room_members drop column if exists tg_notified_at`,
+  `alter table users drop column if exists can_use_telegram`,
+  // Dead platform_settings rows: the stored bot token, its routing config
+  // and the old nightly-backup schedule are all unused now.
+  `delete from platform_settings where key in ('pc_bot', 'pc_tg_bot', 'pc_backup')`,
 ];
 
 export async function applyMigrations(query) {

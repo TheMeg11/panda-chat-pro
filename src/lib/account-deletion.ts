@@ -1,9 +1,8 @@
 import { eq } from "drizzle-orm";
 import { sql } from "drizzle-orm";
 import { db } from "@/db";
-import { messages, roomMembers, rooms, telegramLinks, users } from "@/db/schema";
+import { messages, roomMembers, rooms, users } from "@/db/schema";
 import { audit } from "./audit";
-import { getPlatformBot, tg } from "./telegram/platform";
 
 /**
  * Emergency account deletion policy.
@@ -11,26 +10,9 @@ import { getPlatformBot, tg } from "./telegram/platform";
  * Deletion means:
  *  - the user row and every owned room/member/file/message cascade away,
  *  - guest messages in OTHER people's rooms are anonymized ("Deleted user"),
- *  - the Telegram link is severed with a final notice,
  *  - a tombstone row is written so a future `restore` re-applies the deletion
  *    instead of resurrecting the deleted account.
  */
-
-export async function notifyAccountDeletion(userId: string, username: string): Promise<void> {
-  const [link] = await db.select().from(telegramLinks).where(eq(telegramLinks.userId, userId)).limit(1);
-  if (!link) return;
-  const bot = await getPlatformBot();
-  if (!bot.configured) return;
-  await tg(bot.token, "sendMessage", {
-    chat_id: link.chatId,
-    text:
-      `👋 <b>Your Panda Chat account has been deleted.</b>\n\n` +
-      `The account @${username} and all of its rooms, messages and files were removed as requested. ` +
-      `This Telegram chat is now disconnected.\n\n` +
-      `Thank you for using Panda Chat 🐼`,
-    parse_mode: "HTML",
-  }).catch(() => undefined);
-}
 
 /**
  * Re-applies the deletion policy for tombstoned users after a restore:

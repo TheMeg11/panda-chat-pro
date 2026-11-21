@@ -7,9 +7,9 @@ limits are. It accompanies the 2026 security-audit remediation.
 
 | Attacker | Protected against |
 | --- | --- |
-| Another platform user | Room passwords, unguessable 256-bit invite tokens, exact-username-only search, DM consent (`allowBotDm`), per-room access control re-checked on every request |
+| Another platform user | Room passwords, unguessable 256-bit invite tokens, exact-username-only search, per-room access control re-checked on every request |
 | A compromised server / hosting provider (DMs) | **E2EE for direct messages** — the server only stores ciphertext (see below) |
-| Session hijacking | HttpOnly cookies, sha256-hashed tokens at rest, ephemeral sessions revoked on page load, password change kills all sessions, 2FA (TOTP), new-device Telegram alerts, per-session revoke |
+| Session hijacking | HttpOnly cookies, sha256-hashed tokens at rest, ephemeral sessions revoked on page load, password change kills all sessions, 2FA (TOTP), new-device audit entries, per-session revoke |
 | CSRF | Origin checks hardened with `Sec-Fetch-Site`, opaque-origin rejection, Next.js Server Action origin checks |
 | Someone with your phone | Hidden-chat vault (device-local), decoy PIN, panic mode, self-destructing messages |
 | Leaked backups | AES-256-GCM encrypted archives (PCENC1), dedicated key, tombstoned account deletions re-applied on restore |
@@ -47,9 +47,8 @@ applied — only type hardening and this documentation.
   original filename/mime travel inside the encrypted message body.
 - **The server rejects plaintext bodies for E2EE rooms** (`e2eeRequired`) —
   it cannot be tricked into storing readable text.
-- Telegram forwarding is disabled for E2EE conversations; `/recent`, `/send`
-  and routing destinations exclude them. The bot never receives ciphertext
-  and the server never acts as a decryption oracle.
+- Message search is disabled for E2EE conversations; the server never acts
+  as a decryption oracle for their ciphertext.
 
 Known limits (by design, stated honestly):
 
@@ -89,8 +88,7 @@ file by the maintenance loop.
 - Expired media hard-deleted (default 24 h TTL); storage-quota pruning targets
   oldest messages first.
 - Account deletion: cascades owned rooms/files, anonymizes guest messages,
-  severs the Telegram link with a final notice, and writes a **tombstone** so a
-  later backup restore re-applies the deletion.
+  and writes a **tombstone** so a later backup restore re-applies the deletion.
 
 ## Security headers
 
@@ -117,9 +115,7 @@ instead of being faked.
 - `APP_SECRET` is **required** in production — the app refuses to boot without
   it (no more DATABASE_URL-derived key fallback).
 - `BACKUP_ENCRYPTION_KEY` is the offline recovery key for backups; keep a copy
-  outside Telegram.
-- `WEBHOOK_SECRET` (min 16 chars) gates `/api/telegram/webhook/platform`;
-  without it the route answers 403.
+  somewhere safe outside the server.
 - `GIPHY_API_KEY` – optional: Giphy API key for the GIF picker (get a free key
   at developers.giphy.com); there is no keyless fallback, so without a valid
   key the picker degrades gracefully with an actionable message.

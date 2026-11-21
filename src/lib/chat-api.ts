@@ -1,4 +1,3 @@
-import { after } from "next/server";
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { roomMembers } from "@/db/schema";
@@ -10,7 +9,6 @@ import { rateLimit } from "./rate-limit";
 import { isSameOrigin } from "./request";
 import { getRoomById } from "./rooms";
 import { getSettings } from "./settings";
-import { forwardMessageToTelegram } from "./telegram/service";
 
 export type ChatViewer = Viewer & { authorName: string };
 
@@ -103,13 +101,6 @@ export async function chatPost(req: Request, room: Room, viewer: ChatViewer, roo
     encrypted,
     ...(gifId ? { gifId } : {}),
   });
-  // E2EE rooms never forward to Telegram — the bot must NOT receive ciphertext
-  // it cannot decrypt, and the server must not ship it a decryption oracle.
-  if (viewer.role === "guest" && !room.e2eeEnabled) {
-    after(() =>
-      forwardMessageToTelegram(room.id, msg.id).catch((error) => console.error("[panda-chat] forward failed", error)),
-    );
-  }
   await touchMember(viewer.memberId);
   const fresh = (await getRoomById(room.id)) ?? room;
   const afterId = Math.max(0, Number(payload?.after) || 0);

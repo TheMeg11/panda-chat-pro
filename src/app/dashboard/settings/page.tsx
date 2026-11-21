@@ -3,13 +3,12 @@ import Link from "next/link";
 import { KeyRound, Laptop, LogOut, Smartphone, TriangleAlert, UserRound, X } from "lucide-react";
 import { and, desc, eq, gt } from "drizzle-orm";
 import { db } from "@/db";
-import { rooms, sessions } from "@/db/schema";
+import { sessions } from "@/db/schema";
 import { changePasswordAction, deleteAccountAction, revokeSessionAction, signOutOthersAction, updateProfileAction } from "@/app/actions/account";
 import { Avatar } from "@/components/brand";
 import { InstallAppCard } from "@/components/pwa";
 import { AvatarForm } from "@/components/dashboard/avatar-form";
 import { NotificationsCard } from "@/components/dashboard/notifications-card";
-import { TelegramCard } from "@/components/dashboard/telegram-card";
 import { ThemeCard } from "@/components/dashboard/theme-card";
 import { ReplayTutorialButton } from "@/components/tutorial/tutorial-gate";
 import { TwoFactorCard } from "@/components/security/twofactor-card";
@@ -18,9 +17,6 @@ import { ActionForm, LocalTime, PasswordInput, SubmitButton } from "@/components
 import { requireUser } from "@/lib/auth";
 import { formatNumber } from "@/lib/i18n";
 import { getI18n } from "@/lib/i18n-server";
-import { getSettings } from "@/lib/settings";
-import { getPlatformBot, getPlatformOwnerId } from "@/lib/telegram/platform";
-import { BOT_COMMANDS, linkForUser } from "@/lib/telegram/service";
 import { is2faEnabled } from "@/lib/twofactor";
 import { fmt } from "@/lib/utils";
 
@@ -61,28 +57,15 @@ function describeAgent(ua: string | null) {
 export default async function AccountPage() {
   const user = await requireUser();
   const { t, lang } = await getI18n();
-  const [list, ownedRooms, settings, link, bot, twofa, ownerId] = await Promise.all([
+  const [list, twofa] = await Promise.all([
     db
       .select()
       .from(sessions)
       .where(and(eq(sessions.userId, user.id), gt(sessions.expiresAt, new Date())))
       .orderBy(desc(sessions.lastSeenAt)),
-    db.select({ id: rooms.id, name: rooms.name }).from(rooms).where(eq(rooms.ownerId, user.id)),
-    getSettings(),
-    linkForUser(user.id),
-    getPlatformBot(),
     is2faEnabled(user.id),
-    getPlatformOwnerId(),
   ]);
 
-  let mutedRooms: Array<{ id: string; name: string }> = [];
-  if (link && link.mutedRooms.length > 0) {
-    const rows = await db
-      .select({ id: rooms.id, name: rooms.name })
-      .from(rooms)
-      .where(eq(rooms.ownerId, user.id));
-    mutedRooms = rows.filter((r) => link.mutedRooms.includes(r.id));
-  }
   const [sinceBefore, sinceAfter = ""] = t.account.memberSince.split("{date}");
 
   const anchors = [
@@ -90,7 +73,6 @@ export default async function AccountPage() {
     { href: "#account", label: t.common.account },
     { href: "#notifications", label: t.common.notifications },
     { href: "#security", label: t.common.security },
-    { href: "#telegram", label: t.common.telegramBotSettings },
   ];
 
   return (
@@ -314,33 +296,6 @@ export default async function AccountPage() {
 
           <SecurityCard />
         </section>
-
-        {/* ---------------------------------------------------------- */}
-        {/* Telegram: bot link, forwarding, offline notify, bot DMs      */}
-        {/* (the card itself is <section id="telegram"> + scroll-mt-20) */}
-        {/* ---------------------------------------------------------- */}
-        <TelegramCard
-          telegramEnabled={settings.telegramEnabled}
-          paid={settings.telegramPaid}
-          allowed={user.canUseTelegram}
-          botUsername={bot.botUsername}
-          isOwner={user.id === ownerId}
-          bot={{ configured: bot.configured, source: bot.source, lastError: bot.lastError, hint: bot.hint }}
-          link={
-            link
-              ? {
-                  chatName: link.chatName,
-                  username: link.username,
-                  forwardEnabled: link.forwardEnabled,
-                  offlineNotify: link.offlineNotify,
-                  announceEnabled: link.announceEnabled,
-                  allowBotDm: link.allowBotDm,
-                  mutedRooms,
-                }
-              : null
-          }
-          commands={BOT_COMMANDS}
-        />
 
         <InstallAppCard />
 

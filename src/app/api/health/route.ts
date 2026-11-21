@@ -1,6 +1,5 @@
 import { db } from "@/db";
 import { sql } from "drizzle-orm";
-import { ensurePoller } from "@/lib/telegram/poller";
 import { APP_VERSION } from "@/lib/version";
 
 export const dynamic = "force-dynamic";
@@ -12,7 +11,6 @@ export async function GET() {
     // rows is not an error; only a missing relation (schema not applied)
     // throws here.
     await db.execute(sql`select 1 from platform_settings limit 1`);
-    ensurePoller();
     // `ver` doubles as the deploy marker — the live site can be checked
     // against the repo version without any authentication.
     return Response.json({ ok: true, db: "ready", ver: APP_VERSION });

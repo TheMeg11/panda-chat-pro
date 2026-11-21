@@ -7,7 +7,6 @@ import type { LucideIcon } from "lucide-react";
 import {
   Ban,
   ChevronLeft,
-  ExternalLink,
   KeyRound,
   Link2,
   Lock,
@@ -15,16 +14,13 @@ import {
   MessageCircle,
   PencilLine,
   RefreshCw,
-  Send,
   Settings2,
   ShieldCheck,
-  Terminal,
   Timer,
   TriangleAlert,
   UserCheck,
   Users,
   UserX,
-  Zap,
 } from "lucide-react";
 import { roomAction } from "@/app/actions/rooms";
 import { setRoomTtlAction } from "@/app/actions/e2ee";
@@ -51,16 +47,8 @@ export type WorkspaceRoom = {
 export type WorkspaceMember = { id: string; shortId: string; nickname: string; status: string; lastSeenAt: string };
 /** v2.5.0 (B-12): the owner row shown above the guest list in the members tab. */
 export type WorkspaceOwner = { nickname: string } | null;
-export type WorkspaceTelegram = {
-  platformEnabled: boolean;
-  paid: boolean;
-  allowed: boolean;
-  linked: boolean;
-  chatName: string | null;
-  muted: boolean;
-};
 
-type Tab = "share" | "security" | "telegram" | "members" | "settings";
+type Tab = "share" | "security" | "members" | "settings";
 
 type Props = {
   room: WorkspaceRoom;
@@ -69,17 +57,15 @@ type Props = {
   snapshot: ChatSnapshot;
   members: WorkspaceMember[];
   owner?: WorkspaceOwner;
-  telegram: WorkspaceTelegram;
   maxLength: number;
-  commands: Array<{ command: string; description: string }>;
 };
 
 /**
  * v2.0 — the owner's room manager is a TABBED MODAL in the theme's style
  * (pill tabs across the top), opened from the header "manage" button.
  * Mobile keeps the same modal as a bottom sheet. Everything inside is the
- * exact same forms/actions as v1.x (share / security / telegram / members /
- * settings), restyled with the v2.0 tokens.
+ * exact same forms/actions as v1.x (share / security / members / settings),
+ * restyled with the v2.0 tokens.
  */
 export function RoomWorkspace(props: Props) {
   const { room, snapshot, maxLength, isOwner } = props;
@@ -190,7 +176,7 @@ function Hidden({ roomId, op }: { roomId: string; op: string }) {
 }
 
 /** The tabbed manage modal (theme style). */
-function RoomManagerModal({ open, onClose, room, members, owner, telegram, commands }: Props & { open: boolean; onClose: () => void }) {
+function RoomManagerModal({ open, onClose, room, members, owner }: Props & { open: boolean; onClose: () => void }) {
   const { t, lang } = useI18n();
   const router = useRouter();
   const now = useNow();
@@ -206,7 +192,6 @@ function RoomManagerModal({ open, onClose, room, members, owner, telegram, comma
   const tabs: Array<[Tab, LucideIcon, string]> = [
     ["share", Link2, t.room.tabShare],
     ["security", ShieldCheck, t.room.tabSecurity],
-    ["telegram", Send, t.room.tabTelegram],
     ["members", Users, t.room.tabMembers],
     ["settings", Settings2, t.room.tabSettings],
   ];
@@ -314,95 +299,6 @@ function RoomManagerModal({ open, onClose, room, members, owner, telegram, comma
                 </ActionButton>
               </div>
             </section>
-          </>
-        ) : null}
-
-        {tab === "telegram" ? (
-          <>
-            {!telegram.platformEnabled ? <div className="notice notice-amber">{t.room.tgDisabledPlatform}</div> : null}
-            {telegram.platformEnabled && telegram.paid && !telegram.allowed ? (
-              <div className="notice notice-amber">{t.room.tgNeedPremium}</div>
-            ) : null}
-            {!telegram.linked ? (
-              <section className="rounded-2xl border border-line bg-surface-2/50 p-5">
-                <PanelTitle icon={Send} tone="sky" title={t.room.tgTitle} />
-                <p className="mt-2 text-sm leading-relaxed text-muted">{t.room.tgIntro}</p>
-                <ol className="mt-4 space-y-2.5">
-                  {[t.room.tgStep1, t.room.tgStep2, t.room.tgStep3].map((step, i) => (
-                    <li key={step} className="flex gap-3 text-sm text-ink-2">
-                      <span className="grid size-6 shrink-0 place-items-center rounded-lg bg-sky-soft text-xs font-extrabold text-sky-ink">
-                        {formatNumber(i + 1, lang)}
-                      </span>
-                      <span className="leading-relaxed">{step}</span>
-                    </li>
-                  ))}
-                </ol>
-                <Link href="/dashboard/settings#telegram" className="btn btn-primary btn-sm mt-5">
-                  <Send className="size-4" />
-                  {t.room.tgGoSettings}
-                </Link>
-              </section>
-            ) : (
-              <>
-                <section className="rounded-2xl border border-line bg-surface-2/50 p-5">
-                  <div className="flex items-center gap-3">
-                    <span className="grid size-11 shrink-0 place-items-center rounded-xl bg-sky-soft text-sky-ink">
-                      <Send className="size-5" />
-                    </span>
-                    <div className="min-w-0 flex-1">
-                      <p className="text-xs font-bold text-muted">{t.room.tgConnectedAs}</p>
-                      <p className="truncate font-extrabold text-ink" dir="auto">
-                        {telegram.chatName}
-                      </p>
-                    </div>
-                    <span className="badge badge-mint">{t.room.tgStatusActive}</span>
-                  </div>
-                  <div className="mt-4 flex items-center justify-between gap-4 rounded-xl border border-line bg-surface p-3">
-                    <div>
-                      <p className="text-sm font-bold text-ink">{telegram.muted ? t.room.tgRoomMuted : t.room.tgRoomNotifying}</p>
-                      <p className="mt-0.5 text-xs leading-relaxed text-muted">{t.room.tgMuteHint}</p>
-                    </div>
-                    <ActionButton
-                      action={roomAction}
-                      fields={fields("tgMute")}
-                      className="rounded-full p-0.5"
-                      title={t.room.tgMuteHint}
-                    >
-                      <span className={cn("relative block h-[1.45rem] w-10 rounded-full transition", !telegram.muted ? "bg-accent" : "bg-line-strong")}>
-                        <span
-                          className={cn(
-                            "absolute top-[3px] size-[calc(1.45rem-6px)] rounded-full bg-white shadow transition-all",
-                            !telegram.muted ? "start-[calc(100%-1.45rem+3px)]" : "start-[3px]",
-                          )}
-                        />
-                      </span>
-                    </ActionButton>
-                  </div>
-                  <div className="mt-4 flex flex-wrap gap-2">
-                    <ActionButton action={roomAction} fields={fields("tgTest")} className="btn btn-secondary btn-sm">
-                      <Zap className="size-4" />
-                      {t.room.tgTest}
-                    </ActionButton>
-                    <Link href="/dashboard/settings#telegram" className="btn btn-ghost btn-sm">
-                      <ExternalLink className="size-4" />
-                      {t.room.tgManageAccount}
-                    </Link>
-                  </div>
-                </section>
-
-                <section className="rounded-2xl border border-line bg-surface-2/50 p-5">
-                  <PanelTitle icon={Terminal} tone="mint" title={t.room.tgCommands} />
-                  <ul className="mt-4 space-y-1.5" dir="ltr">
-                    {commands.map((c) => (
-                      <li key={c.command} className="flex items-baseline gap-2 text-xs">
-                        <code className="shrink-0 rounded-md bg-accent-soft px-1.5 py-0.5 font-mono font-bold text-accent-ink">/{c.command}</code>
-                        <span className="text-muted">{c.description}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </section>
-              </>
-            )}
           </>
         ) : null}
 

@@ -1,7 +1,7 @@
 import { Database, History, KeyRound, LogOut, ServerCog, Trash2 } from "lucide-react";
 import { desc, gt, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { adminSessions, auditLogs, messages, roomMembers, rooms, sessions, telegramBots, telegramLinks, users } from "@/db/schema";
+import { adminSessions, auditLogs, messages, roomMembers, rooms, sessions, users } from "@/db/schema";
 import { adminAction } from "@/app/actions/admin";
 import { EmptyRow, PageHeader, Section, TableWrap } from "@/components/admin/parts";
 import { ActionButton, LocalTime } from "@/components/ui";
@@ -9,7 +9,6 @@ import { getAdminConfig, getAdminSession, isAdminSlug } from "@/lib/admin-auth";
 import { formatNumber } from "@/lib/i18n";
 import { getI18n } from "@/lib/i18n-server";
 import { getSettings } from "@/lib/settings";
-import { pollerStatus } from "@/lib/telegram/poller";
 import { fmt } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
@@ -21,28 +20,21 @@ export default async function AdminSystem({ params }: { params: Promise<{ panel:
   const n = (v: number) => formatNumber(v, lang);
   const now = new Date();
   const count = sql<number>`count(*)::int`;
-  const [[us], [as], [cu], [cr], [cm], [cmb], [cb], [cl], [ca], audits, settings] = await Promise.all([
+  const [[us], [as], [cu], [cr], [cm], [cmb], [ca], audits, settings] = await Promise.all([
     db.select({ n: count }).from(sessions).where(gt(sessions.expiresAt, now)),
     db.select({ n: count }).from(adminSessions).where(gt(adminSessions.expiresAt, now)),
     db.select({ n: count }).from(users),
     db.select({ n: count }).from(rooms),
     db.select({ n: count }).from(messages),
     db.select({ n: count }).from(roomMembers),
-    db.select({ n: count }).from(telegramBots),
-    db.select({ n: count }).from(telegramLinks),
     db.select({ n: count }).from(auditLogs),
     db.select().from(auditLogs).orderBy(desc(auditLogs.id)).limit(100),
     getSettings(),
   ]);
   const config = getAdminConfig();
-  const poller = pollerStatus();
   const env: Array<[string, string]> = [
     [t.admin.envAdminPath, `/${config.path}`],
     [t.admin.envRuntime, `Node ${process.version} · ${process.env.NODE_ENV ?? "development"}`],
-    [
-      t.admin.envTelegramMode,
-      `${process.env.TELEGRAM_MODE === "webhook" ? "webhook" : "long polling"} · ${poller.started && poller.running > 0 ? fmt(t.admin.pollerRunning, { n: n(poller.running) }) : t.admin.pollerStopped}`,
-    ],
     [t.admin.envAppSecret, process.env.APP_SECRET ? t.admin.envSet : t.admin.envFallback],
     [t.admin.envPublicUrl, settings.publicUrl || process.env.APP_URL || t.admin.auto],
   ];
@@ -51,8 +43,6 @@ export default async function AdminSystem({ params }: { params: Promise<{ panel:
     ["rooms", cr.n],
     ["messages", cm.n],
     ["room_members", cmb.n],
-    ["telegram_links", cl.n],
-    ["telegram_bots (legacy)", cb.n],
     ["audit_logs", ca.n],
   ];
 

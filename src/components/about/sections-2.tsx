@@ -53,18 +53,6 @@ const manageTabs: { id: string; label: string; icon: Icon; tone: Tone; title: st
     ],
   },
   {
-    id: "telegram",
-    label: "تلگرام",
-    icon: Bot,
-    tone: "sky",
-    title: "اعلان‌های این اتاق در تلگرام",
-    items: [
-      "وضعیت اعلان همین اتاق: روشن یا بی‌صدا. اتاق بی‌صدا دیگر به تلگرام شما ارسال نمی‌شود تا دوباره فعالش کنید.",
-      "«ارسال پیام آزمایشی» برای اطمینان از این‌که اتصال تلگرام درست کار می‌کند.",
-      "فهرست دستورهای ربات و راهنمای اتصال، اگر هنوز حساب خود را به تلگرام وصل نکرده باشید.",
-    ],
-  },
-  {
     id: "members",
     label: "اعضا",
     icon: Users,
@@ -85,7 +73,7 @@ const manageTabs: { id: string; label: string; icon: Icon; tone: Tone; title: st
     items: [
       "ویرایش نام و توضیحات اتاق.",
       "«پاک کردن تاریخچه»: همه پیام‌های اتاق برای همه حذف می‌شود.",
-      "«حذف اتاق»: اتاق، پیام‌ها، اعضا و اتصال ربات آن برای همیشه حذف می‌شود.",
+      "«حذف اتاق»: اتاق، پیام‌ها و اعضای آن برای همیشه حذف می‌شود.",
     ],
   },
 ];
@@ -106,7 +94,7 @@ export function Rooms() {
       <div className="mt-10 grid items-start gap-8 lg:grid-cols-2">
         <ul className="space-y-4">
           <Point icon={Layers} tone="accent">
-            <b className="text-ink">آمار کلی:</b> تعداد اتاق‌ها، مجموع اعضا و اتاق‌هایی که به تلگرام متصل‌اند.
+            <b className="text-ink">آمار کلی:</b> تعداد اتاق‌ها و مجموع اعضا.
           </Point>
           <Point icon={Plus} tone="lavender">
             <b className="text-ink">سهمیه اتاق:</b> عبارتی مثل «۲ از ۵ استفاده شده» نشان می‌دهد چند اتاق دیگر

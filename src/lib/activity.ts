@@ -1,16 +1,15 @@
 /**
  * In-process user-activity tracker (cost tier B/C, 2026-11-21).
  *
- * Background loops (maintenance sweep, offline-notify sweep, backup ticker)
- * consult this BEFORE doing any work. On a serverless (sleeping) deployment
- * every outbound packet — even a single settings SELECT to the internal
- * Postgres — resets Railway's idle timer and keeps the container awake
- * forever. Gating on real user traffic is what lets the app actually sleep.
+ * Background loops (maintenance sweep) consult this BEFORE doing any work.
+ * On a serverless (sleeping) deployment every outbound packet — even a single
+ * settings SELECT to the internal Postgres — resets Railway's idle timer and
+ * keeps the container awake forever. Gating on real user traffic is what lets
+ * the app actually sleep.
  *
  * What counts as activity (markActivity call sites):
  *  - an authenticated web/API/server-action request (getCurrentUser)
  *  - a valid Super Admin panel session (getAdminSession)
- *  - an authenticated Telegram webhook delivery (platform + [roomId])
  *  - a guest chat poll/send on /api/r/[token]/* (resolve succeeded)
  *
  * Deliberately NOT activity: the health check, static assets, anonymous
@@ -25,15 +24,8 @@ const minutes = (raw: string | undefined, fallback: number, min: number, max: nu
   return Math.min(max, Math.max(min, Math.round(n)));
 };
 
-/** Idle window for general background work (maintenance, backup ticker). */
+/** Idle window for general background work (maintenance). */
 export const ACTIVE_WINDOW_MS = minutes(process.env.ACTIVITY_WINDOW_MINUTES, 10, 1, 120) * 60_000;
-
-/**
- * Wider window for the offline-notify sweep: digests become eligible once a
- * message is 15+ minutes old, so the sweep must keep running for a while
- * after the last web request or freshly-eligible digests would never fire.
- */
-export const NOTIFY_WINDOW_MS = minutes(process.env.NOTIFY_WINDOW_MINUTES, 20, 5, 120) * 60_000;
 
 /** Records that a real user just interacted with the app. */
 export function markActivity(at: number = Date.now()): void {

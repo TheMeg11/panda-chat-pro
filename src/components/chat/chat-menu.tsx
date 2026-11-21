@@ -16,7 +16,6 @@ import { useRouter } from "next/navigation";
 import {
   Ban,
   Bell,
-  Bot,
   EyeOff,
   Info,
   LogOut,
@@ -141,7 +140,6 @@ export function ChatHamburgerMenu({ roomId, variant, isOwner, blocked, onAfterAc
               <LinkItem href="/dashboard/settings#account" icon={<UserRound className="size-4" />} label={t.common.account} onClick={() => setOpen(false)} />
               <LinkItem href="/dashboard/settings#notifications" icon={<Bell className="size-4" />} label={t.common.notifications} onClick={() => setOpen(false)} />
               <LinkItem href="/dashboard/settings#security" icon={<ShieldCheck className="size-4" />} label={t.common.security} onClick={() => setOpen(false)} />
-              <LinkItem href="/dashboard/settings#telegram" icon={<Bot className="size-4" />} label={t.common.telegramBotSettings} onClick={() => setOpen(false)} />
               <LinkItem href="/dashboard/about" icon={<Info className="size-4" />} label={t.common.aboutSite} onClick={() => setOpen(false)} />
             </nav>
             <div className="my-1 border-t border-line" />

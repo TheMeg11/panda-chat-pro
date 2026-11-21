@@ -4,7 +4,7 @@ import type { ReactNode } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { LucideIcon } from "lucide-react";
-import { DatabaseBackup, LayoutDashboard, LogOut, MessagesSquare, Send, ServerCog, ShieldCheck, SlidersHorizontal, Users } from "lucide-react";
+import { DatabaseBackup, LayoutDashboard, LogOut, MessagesSquare, ServerCog, ShieldCheck, SlidersHorizontal, Users } from "lucide-react";
 import { adminLoginAction, adminLogoutAction } from "@/app/actions/admin";
 import { Logo } from "@/components/brand";
 import { useI18n } from "@/components/i18n-provider";
@@ -18,7 +18,6 @@ export function AdminShell({ base, children }: { base: string; children: ReactNo
     { href: base, icon: LayoutDashboard, label: t.admin.navOverview, exact: true },
     { href: `${base}/users`, icon: Users, label: t.admin.navUsers },
     { href: `${base}/rooms`, icon: MessagesSquare, label: t.admin.navRooms },
-    { href: `${base}/telegram`, icon: Send, label: t.admin.navTelegram },
     { href: `${base}/backup`, icon: DatabaseBackup, label: t.admin.navBackup },
     { href: `${base}/settings`, icon: SlidersHorizontal, label: t.admin.navPlatform },
     { href: `${base}/system`, icon: ServerCog, label: t.admin.navSystem },

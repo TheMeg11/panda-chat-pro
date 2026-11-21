@@ -13,7 +13,7 @@ describe("isSameOrigin / CSRF (§3.5 hardening)", () => {
     expect(isSameOrigin(req({ ...host, origin: "https://chat.example.com" }))).toBe(true);
   });
 
-  it("accepts missing Origin from non-browser clients (webhooks, curl)", () => {
+  it("accepts missing Origin from non-browser clients (curl, scripts)", () => {
     expect(isSameOrigin(req(host))).toBe(true);
   });
 

@@ -74,7 +74,7 @@ export async function verifyDummyPassword(password: string): Promise<false> {
 }
 
 /* ------------------------------------------------------------------ */
-/* Secret encryption at rest (Telegram bot tokens, TOTP secrets)       */
+/* Secret encryption at rest (TOTP secrets)                          */
 /* ------------------------------------------------------------------ */
 
 let warned = false;

@@ -9,18 +9,21 @@ import { APP_VERSION } from "../../src/lib/version";
  * schema migrations, service-worker behaviour, and the hold-to-hide gesture.
  */
 describe("v1.6.0 contracts", () => {
-  it("ships the announcement columns for telegram_links", () => {
+  it("ships the v2.6.0 telegram-removal migrations", () => {
     const joined = MIGRATIONS.join("\n");
-    expect(joined).toContain("add column if not exists announce_enabled boolean not null default true");
-    expect(joined).toContain("add column if not exists announced_at timestamptz");
-    // offline digest is opt-OUT for new links since v1.6.0 (existing rows untouched)
-    expect(joined).toContain("alter column offline_notify set default true");
+    // v2.6.0 — the Telegram integration is gone: dead tables/columns drop.
+    expect(joined).toContain("drop table if exists telegram_links");
+    expect(joined).toContain("drop table if exists telegram_bots");
+    expect(joined).toContain("drop table if exists telegram_link_codes");
+    expect(joined).toContain("drop table if exists password_resets");
+    expect(joined).toContain("alter table users drop column if exists can_use_telegram");
   });
 
-  it("init.sql covers the same columns for fresh installs", () => {
+  it("init.sql covers the same drops for existing installs", () => {
     const sql = readFileSync(new URL("../../sql/init.sql", import.meta.url), "utf8");
-    expect(sql).toContain("ADD COLUMN IF NOT EXISTS announce_enabled boolean NOT NULL DEFAULT true");
-    expect(sql).toContain("ADD COLUMN IF NOT EXISTS announced_at timestamptz");
+    expect(sql).toContain("DROP TABLE IF EXISTS telegram_links");
+    expect(sql).toContain("DROP TABLE IF EXISTS telegram_bots");
+    expect(sql.toUpperCase()).not.toContain("CREATE TABLE IF NOT EXISTS TELEGRAM_LINKS");
   });
 
   it("v2.2.0: hold-to-hide is replaced by the instant server action", () => {
@@ -112,14 +115,5 @@ describe("v1.6.0 contracts", () => {
     // register captcha is verified server-side
     const auth = readFileSync(new URL("../../src/app/actions/auth.ts", import.meta.url), "utf8");
     expect(auth).toContain("verifyCaptcha");
-  });
-
-  it("announcement sweep + owner bot actions exist", () => {
-    const sweep = readFileSync(new URL("../../src/lib/telegram/offline-notify.ts", import.meta.url), "utf8");
-    expect(sweep).toContain("export async function sweepAnnouncements");
-    const actions = readFileSync(new URL("../../src/app/actions/telegram.ts", import.meta.url), "utf8");
-    expect(actions).toContain("savePlatformBotAction");
-    expect(actions).toContain("telegramAnnounceAction");
-    expect(actions).toContain("isPlatformOwner");
   });
 });

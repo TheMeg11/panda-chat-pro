@@ -1,6 +1,6 @@
 # Panda Chat Pro 🐼
 
-A privacy-first, Telegram-style anonymous chat PWA built with **Next.js 16**, **React 19**, **Tailwind CSS 4** and **PostgreSQL (Drizzle ORM)**.
+A privacy-first, minimal-footprint anonymous chat PWA built with **Next.js 16**, **React 19**, **Tailwind CSS 4** and **PostgreSQL (Drizzle ORM)**.
 
 Live instance: [chat.kanar.ir](https://chat.kanar.ir)
 
@@ -13,9 +13,8 @@ Live instance: [chat.kanar.ir](https://chat.kanar.ir)
 - ⏱️ **Self-destructing messages** — per-conversation default (off / 1 h / 24 h / 7 d) plus a per-message override; expired rows are filtered at read time and hard-deleted with their files
 - 🕶️ **Hidden chats (vault) + decoy PIN + panic mode** — a second PIN that opens an innocent EMPTY vault, and a panic switch that wipes it
 - 🧹 **Auto-hygiene & data minimization** — media expires after 24 h, session IP/UA blanked after 30 d, audit TTL, storage-quota pruning
-- ✈️ **Telegram integration (extended)** — one platform bot: linking via `/start`, forwarding, media to/from rooms, `/msg` user-to-user DMs with consent, reply threading across rooms, **default-room fallback routing**, admin-configurable texts/permissions/rate limits, webhook mode with secret + idempotency
 - 🧭 **Interactive onboarding tour** — a spotlight guide over the real UI for first-time users (fa/en, RTL, keyboard-accessible, replayable from settings)
-- 🛡️ **Super-admin console** — users, rooms, sessions, encrypted backups (nightly, `/restore` supported with deletion tombstones), audit log, bot management, webhook control, storage meter
+- 🛡️ **Super-admin console** — users, rooms, sessions, encrypted backups (one-click download + upload restore, deletion tombstones), audit log, storage meter
 - 📱 **PWA** — installable, offline shell, multi-size icons
 
 ## Tech
@@ -51,8 +50,8 @@ baseline schema (`select 1 from platform_settings limit 1`). If the table is
 missing — e.g. the service was redeployed **without** its `preDeployCommand`
 (`node scripts/db-init.mjs`), or the database was re-created — the app applies
 `sql/init.sql` plus the incremental migrations from `scripts/db-migrate.mjs`
-by itself, verifies the baseline tables, and only then starts the Telegram
-poller and maintenance loops. A healthy database costs one trivial query per
+by itself, verifies the baseline tables, and only then starts the maintenance
+loop. A healthy database costs one trivial query per
 boot. `/api/health` still reports 503 `schema-missing` if healing fails (e.g.
 the DB is unreachable), so monitors catch it.
 
@@ -65,12 +64,9 @@ See `.env.example` for the full annotated list. Highlights:
 | `DATABASE_URL`           | ✅       | PostgreSQL connection string                                 |
 | `APP_SECRET`             | ✅ prod  | Long random string — encrypts secrets at rest; **production refuses to boot without it** |
 | `BACKUP_ENCRYPTION_KEY`  | –        | Dedicated AES-256-GCM key for backups (keep a copy offline!) |
-| `SUPERADMIN_CHAT_ID`     | –        | Telegram chat that owns `/backup /restore /platform`        |
 | `ADMIN_PATH`             | –        | Secret path for the super-admin console (`/<path>`)          |
 | `ADMIN_USERNAME`         | –        | Super-admin username                                         |
 | `ADMIN_PASSWORD`         | –        | Super-admin password (or `ADMIN_PASSWORD_HASH`)              |
-| `TELEGRAM_MODE`          | –        | `polling` (default) or `webhook`                             |
-| `WEBHOOK_SECRET`         | webhook  | Min 16 chars; gates `/api/telegram/webhook/platform`         |
 | `FILES_MAX_MB`           | –        | Max upload size (default 15)                                 |
 | `FILES_TTL_HOURS`        | –        | Media retention (default 24)                                 |
 | `STORAGE_QUOTA_MB`       | –        | DB size that triggers pruning (default 800)                  |
@@ -99,10 +95,10 @@ Short version — the full threat model, crypto inventory and honest limits live
 in [docs/SECURITY.md](docs/SECURITY.md).
 
 - Session tokens: HttpOnly cookies, sha256-hashed at rest, optional "remember me" + ephemeral sessions
-- Login hardening: 2FA (TOTP + recovery codes), new-device Telegram alerts, distributed rate limiting
+- Login hardening: 2FA (TOTP + recovery codes), new-device audit entries, distributed rate limiting
 - Room passwords: scrypt, versioned — changing a password re-gates every member
-- Bot tokens / TOTP secrets: AES-256-GCM encrypted with `APP_SECRET` (domain-separated)
-- Backups: AES-256-GCM encrypted archives before they are sent to Telegram
+- TOTP secrets: AES-256-GCM encrypted with `APP_SECRET` (domain-separated)
+- Backups: AES-256-GCM encrypted archives downloaded from the admin panel
 - Uploads: magic-byte sniffing, hard size cap, MIME allow-list, 24 h hard delete
 - Exact-username search only — no directory enumeration; rate-limited
 - E2EE DMs: browser-held keys (ECDH P-256 + HKDF + AES-GCM), server stores ciphertext only

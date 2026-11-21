@@ -1,6 +1,5 @@
 "use server";
 
-import { after } from "next/server";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { and, eq } from "drizzle-orm";
@@ -12,7 +11,6 @@ import { clearRateLimit, rateLimit } from "@/lib/rate-limit";
 import { requestMeta } from "@/lib/request";
 import { addSystemMessage, ensureDeviceHash, getRoomByToken, readDeviceHash, resolveGuestAccess } from "@/lib/rooms";
 import { getSettings } from "@/lib/settings";
-import { esc, notifyTelegram } from "@/lib/telegram/service";
 import type { ActionState } from "@/lib/utils";
 
 async function loadRoom(formData: FormData) {
@@ -79,7 +77,7 @@ export async function joinRoomAction(_prev: ActionState, formData: FormData): Pr
   if ("error" in loaded) return { error: loaded.error };
   const { room, token } = loaded;
 
-  // Joins are spam-sensitive: they create member rows and Telegram notifications.
+  // Joins are spam-sensitive: they create member rows and system messages.
   const meta = await requestMeta();
   if (!rateLimit(`join:${meta.ip}`, 10, 60 * 60_000).ok) return { error: "rateLimited" };
 
@@ -120,7 +118,6 @@ export async function joinRoomAction(_prev: ActionState, formData: FormData): Pr
   }
   if (!wasMember) {
     await addSystemMessage(room.id, "joined", nickname);
-    after(() => notifyTelegram(room.id, `👋 <b>${esc(nickname)}</b> joined <b>${esc(room.name)}</b>`));
   }
   revalidatePath(`/r/${token}`);
   return { ok: true };

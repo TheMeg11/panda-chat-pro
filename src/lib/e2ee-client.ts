@@ -17,8 +17,8 @@
  * any device where the user can log in can unwrap the SAME private key.
  *
  * Limitations (documented in docs/SECURITY.md): metadata (author name,
- * timestamps, reply graph) stays visible to the server; message search and
- * Telegram forwarding are disabled for E2EE conversations; pre-E2EE history
+ * timestamps, reply graph) stays visible to the server; message search is
+ * disabled for E2EE conversations; pre-E2EE history
  * remains server-readable plaintext.
  */
 

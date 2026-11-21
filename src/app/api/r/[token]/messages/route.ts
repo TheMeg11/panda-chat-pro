@@ -2,7 +2,6 @@ import { markActivity } from "@/lib/activity";
 import { chatDelete, chatGet, chatJson, chatPost } from "@/lib/chat-api";
 import { getRoomByToken, resolveGuestAccess } from "@/lib/rooms";
 import { getSettings } from "@/lib/settings";
-import { ensurePoller } from "@/lib/telegram/poller";
 
 export const dynamic = "force-dynamic";
 
@@ -26,7 +25,6 @@ async function resolve(ctx: Ctx) {
 }
 
 export async function GET(req: Request, ctx: Ctx) {
-  ensurePoller();
   const r = await resolve(ctx);
   if ("error" in r) return r.error;
   // An active guest keeps the serverless container awake (2s poll loop).

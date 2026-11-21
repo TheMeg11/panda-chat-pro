@@ -1,8 +1,8 @@
 import Link from "next/link";
-import { Activity, MessageCircle, MessagesSquare, Send, Users, Wifi } from "lucide-react";
+import { Activity, MessageCircle, MessagesSquare, Users, Wifi } from "lucide-react";
 import { and, desc, eq, gt, isNotNull, ne, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { auditLogs, messages, roomMembers, rooms, sessions, telegramLinks, users } from "@/db/schema";
+import { auditLogs, messages, roomMembers, rooms, sessions, users } from "@/db/schema";
 import { PageHeader, Section, StatCard } from "@/components/admin/parts";
 import { Avatar } from "@/components/brand";
 import { LocalTime } from "@/components/ui";
@@ -20,14 +20,13 @@ export default async function AdminOverview({ params }: { params: Promise<{ pane
   const { t, lang } = await getI18n();
   const n = (v: number) => formatNumber(v, lang);
 
-  const [[u], [r], [m], [b], [s], [o]] = await Promise.all([
+  const [[u], [r], [m], [s], [o]] = await Promise.all([
     db.select({ total: sql<number>`count(*)::int`, suspended: sql<number>`(count(*) filter (where ${users.status} = 'suspended'))::int` }).from(users),
     db.select({ total: sql<number>`count(*)::int`, disabled: sql<number>`(count(*) filter (where ${rooms.isDisabled}))::int` }).from(rooms),
     db
       .select({ total: sql<number>`count(*)::int`, day: sql<number>`(count(*) filter (where ${messages.createdAt} > now() - interval '24 hours'))::int` })
       .from(messages)
       .where(ne(messages.authorRole, "system")),
-    db.select({ total: sql<number>`count(*)::int`, linked: sql<number>`count(*)::int` }).from(telegramLinks),
     db.select({ n: sql<number>`count(*)::int` }).from(sessions).where(gt(sessions.expiresAt, new Date())),
     db
       .select({ n: sql<number>`count(*)::int` })
@@ -52,7 +51,6 @@ export default async function AdminOverview({ params }: { params: Promise<{ pane
         <StatCard icon={Users} label={t.admin.statUsers} value={n(u.total)} hint={fmt(t.admin.statSuspended, { n: n(u.suspended) })} />
         <StatCard icon={MessagesSquare} label={t.admin.statRooms} value={n(r.total)} hint={fmt(t.admin.statDisabled, { n: n(r.disabled) })} tone="bg-lavender-soft text-accent-ink" />
         <StatCard icon={MessageCircle} label={t.admin.statMessages} value={n(m.total)} hint={fmt(t.admin.statMessages24, { n: n(m.day) })} tone="bg-mint-soft text-mint-ink" />
-        <StatCard icon={Send} label={t.admin.statLinks} value={n(b.total)} hint={fmt(t.admin.statAccounts, { n: n(b.linked) })} tone="bg-sky-soft text-sky-ink" />
         <StatCard icon={Wifi} label={t.admin.statOnline} value={n(o.n)} tone="bg-mint-soft text-mint-ink" />
         <StatCard icon={Activity} label={t.admin.statSessions} value={n(s.n)} tone="bg-amber-soft text-amber-ink" />
       </div>

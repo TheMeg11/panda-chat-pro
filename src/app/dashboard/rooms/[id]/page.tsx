@@ -12,8 +12,6 @@ import { getI18n } from "@/lib/i18n-server";
 import { getBaseUrl } from "@/lib/request";
 import { getAccessibleRoom, getEffectiveMember, listMembers, readDeviceHash } from "@/lib/rooms";
 import { getSettings } from "@/lib/settings";
-import { linkForUser } from "@/lib/telegram/service";
-import { BOT_COMMANDS } from "@/lib/telegram/service";
 import { shortId } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
@@ -116,14 +114,12 @@ export default async function RoomPage({ params }: { params: Promise<{ id: strin
   }
 
   /* ------------------------------ classic invite room ------------------------------ */
-  const [settings, baseUrl, members, link] = await Promise.all([
+  const [settings, baseUrl, members] = await Promise.all([
     getSettings(),
     getBaseUrl(),
     listMembers(room.id),
-    linkForUser(user.id),
   ]);
   const snapshot = await buildSnapshot(room, viewer, 0, null);
-  const premiumBlocked = settings.telegramPaid && !user.canUseTelegram;
 
   return (
     <RoomWorkspace
@@ -150,16 +146,7 @@ export default async function RoomPage({ params }: { params: Promise<{ id: strin
           status: m.status,
           lastSeenAt: m.lastSeenAt.toISOString(),
         }))}
-      telegram={{
-        platformEnabled: settings.telegramEnabled,
-        paid: settings.telegramPaid,
-        allowed: !premiumBlocked,
-        linked: Boolean(link),
-        chatName: link?.chatName ?? null,
-        muted: link ? link.mutedRooms.includes(room.id) : false,
-      }}
       maxLength={settings.maxMessageLength}
-      commands={BOT_COMMANDS}
     />
   );
 }

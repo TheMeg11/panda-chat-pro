@@ -6,7 +6,6 @@ import { chatDelete, chatGet, chatJson, chatPost } from "@/lib/chat-api";
 import type { ChatRoomOverride } from "@/lib/chat";
 import { getAccessibleRoom, getEffectiveMember } from "@/lib/rooms";
 import { getSettings } from "@/lib/settings";
-import { ensurePoller } from "@/lib/telegram/poller";
 
 export const dynamic = "force-dynamic";
 
@@ -52,7 +51,6 @@ async function resolve(ctx: Ctx) {
 }
 
 export async function GET(req: Request, ctx: Ctx) {
-  ensurePoller();
   const r = await resolve(ctx);
   if ("error" in r) return r.error;
   return chatGet(req, r.room, r.viewer, r.override);

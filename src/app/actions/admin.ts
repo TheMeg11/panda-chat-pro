@@ -2,10 +2,9 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { after } from "next/server";
 import { and, eq, lt } from "drizzle-orm";
 import { db } from "@/db";
-import { adminSessions, rooms, sessions, telegramLinks, users } from "@/db/schema";
+import { adminSessions, rooms, sessions, users } from "@/db/schema";
 import {
   createAdminSession,
   destroyAdminSession,
@@ -21,7 +20,6 @@ import { clearRateLimit, rateLimit } from "@/lib/rate-limit";
 import { requestMeta } from "@/lib/request";
 import { cleanText, clearRoom, getRoomById, rotateInvite, setMemberStatus, setRoomLocked, setRoomPassword } from "@/lib/rooms";
 import { DEFAULT_SETTINGS, updateSettings } from "@/lib/settings";
-import { clearPlatformBotToken, getPlatformBot, savePlatformBotToken, tg } from "@/lib/telegram/platform";
 import { isUuid, type ActionState } from "@/lib/utils";
 
 export async function adminLoginAction(_prev: ActionState, formData: FormData): Promise<ActionState> {
@@ -67,12 +65,11 @@ export async function adminAction(_prev: ActionState, formData: FormData): Promi
     case "user.update": {
       if (!isUuid(id)) return { error: "notFound" };
       const status = formData.get("status") === "suspended" ? "suspended" : "active";
-      const canUseTelegram = formData.get("canUseTelegram") === "on";
       const maxRooms = intOrNull(formData.get("maxRooms"), 0, 10_000);
-      const [user] = await db.update(users).set({ status, canUseTelegram, maxRooms }).where(eq(users.id, id)).returning();
+      const [user] = await db.update(users).set({ status, maxRooms }).where(eq(users.id, id)).returning();
       if (!user) return { error: "notFound" };
       if (status === "suspended") await db.delete(sessions).where(eq(sessions.userId, id));
-      await audit("user.update", { targetType: "user", targetId: id, details: `status=${status} telegram=${canUseTelegram} maxRooms=${maxRooms ?? "default"}` });
+      await audit("user.update", { targetType: "user", targetId: id, details: `status=${status} maxRooms=${maxRooms ?? "default"}` });
       break;
     }
     case "user.password": {
@@ -161,123 +158,6 @@ export async function adminAction(_prev: ActionState, formData: FormData): Promi
       break;
     }
 
-    /* ---------------- telegram ---------------- */
-    case "bot.token": {
-      const token = String(formData.get("token") ?? "").trim();
-      try {
-        if (!token) {
-          await clearPlatformBotToken();
-          const env = (process.env.TELEGRAM_BOT_TOKEN || process.env.SUPERADMIN_BOT_TOKEN || "").trim();
-          await audit("bot.token_cleared", { details: env ? "fallback to env token" : "no env fallback" });
-        } else {
-          const { botUsername } = await savePlatformBotToken(token);
-          await audit("bot.token_saved", { details: `@${botUsername}` });
-        }
-      } catch (error) {
-        const code = (error as { code?: number }).code;
-        return { error: code === 401 || code === 404 ? "tokenRejected" : code === 0 ? "tokenInvalid" : "telegramUnreachable" };
-      }
-      break;
-    }
-    case "bot.config": {
-      const telegramEnabled = formData.get("telegramEnabled") === "on";
-      const telegramPaid = formData.get("telegramPaid") === "on";
-      await updateSettings({ telegramEnabled, telegramPaid });
-      (globalThis as typeof globalThis & { __pcPollerSync?: () => void }).__pcPollerSync?.();
-      await audit("bot.config", { details: `enabled=${telegramEnabled} paid=${telegramPaid}` });
-      break;
-    }
-    case "bot.settings": {
-      // §6.5 — everything the admin can tune about bot behaviour.
-      const rawRoom = String(formData.get("defaultRoomId") ?? "");
-      let defaultRoomId: string | null = null;
-      if (isUuid(rawRoom)) {
-        const [room] = await db.select({ type: rooms.type }).from(rooms).where(eq(rooms.id, rawRoom)).limit(1);
-        if (!room || room.type !== "room") return { error: "notFound" };
-        defaultRoomId = rawRoom;
-      }
-      const botAdmins = String(formData.get("botAdmins") ?? "")
-        .split(/[\s,;]+/)
-        .map((a) => a.replace(/[^0-9-]/g, "").slice(0, 32))
-        .filter(Boolean);
-      const { updateBotSettings } = await import("@/lib/telegram/bot-settings");
-      await updateBotSettings({
-        defaultRoomId,
-        fallbackEnabled: formData.get("fallbackEnabled") === "on",
-        allowRoomSend: formData.get("allowRoomSend") === "on",
-        allowBotDm: formData.get("allowBotDm") === "on",
-        startText: String(formData.get("startText") ?? "").slice(0, 1500),
-        helpText: String(formData.get("helpText") ?? "").slice(0, 3000),
-        fallbackAckText: String(formData.get("fallbackAckText") ?? "✓ Delivered to {room}").slice(0, 300) || "✓ Delivered to {room}",
-        botAdmins,
-        commandRatePerMin: intOrNull(formData.get("commandRatePerMin"), 3, 60) ?? 20,
-      });
-      await audit("bot.settings", {
-        details: `default=${defaultRoomId ?? "none"} fallback=${formData.get("fallbackEnabled") === "on"} admins=${botAdmins.length}`,
-      });
-      break;
-    }
-    case "webhook.set": {
-      const { getBotSettings } = await import("@/lib/telegram/bot-settings");
-      void getBotSettings;
-      const bot = await getPlatformBot();
-      if (!bot.configured) return { error: "telegramMissing" };
-      const { getBaseUrl } = await import("@/lib/request");
-      const base = (await getBaseUrl()).replace(/\/+$/, "");
-      if (!/^https:/.test(base)) return { error: "invalidInput" };
-      const secret = (process.env.WEBHOOK_SECRET ?? "").trim();
-      if (!secret || secret.length < 16) return { error: "invalidInput" };
-      try {
-        await tg(bot.token, "setWebhook", {
-          url: `${base}/api/telegram/webhook/platform`,
-          secret_token: secret,
-          allowed_updates: ["message", "callback_query"],
-          drop_pending_updates: false,
-        });
-        // Polling and webhook cannot run together.
-        process.env.TELEGRAM_POLLING = "off";
-        (globalThis as typeof globalThis & { __pcPollerSync?: () => void }).__pcPollerSync?.();
-        await audit("webhook.set", { details: base });
-      } catch {
-        return { error: "telegramUnreachable" };
-      }
-      break;
-    }
-    case "webhook.delete": {
-      const bot = await getPlatformBot();
-      if (!bot.configured) return { error: "telegramMissing" };
-      try {
-        await tg(bot.token, "deleteWebhook", { drop_pending_updates: false });
-        delete process.env.TELEGRAM_POLLING;
-        (globalThis as typeof globalThis & { __pcPollerSync?: () => void }).__pcPollerSync?.();
-        await audit("webhook.delete");
-      } catch {
-        return { error: "telegramUnreachable" };
-      }
-      break;
-    }
-    case "link.unlink": {
-      const [link] = await db.delete(telegramLinks).where(eq(telegramLinks.id, id)).returning();
-      if (!link) return { error: "notFound" };
-      const bot = await getPlatformBot();
-      if (bot.configured) {
-        await tg(bot.token, "sendMessage", {
-          chat_id: link.chatId,
-          text: "👋 This chat was disconnected from Panda Chat by the administrator.",
-        }).catch(() => undefined);
-      }
-      await audit("bot.unlink", { targetType: "telegram_link", targetId: id });
-      break;
-    }
-    case "bot.disconnect": {
-      // Legacy per-room bots (kept so old rows can still be removed).
-      if (!isUuid(id)) return { error: "notFound" };
-      const legacy = await import("@/lib/telegram/legacy");
-      await legacy.teardownBot(id);
-      await audit("bot.disconnect", { targetType: "room", targetId: id });
-      break;
-    }
-
     /* ---------------- platform & system ---------------- */
     case "settings.update": {
       const publicUrl = String(formData.get("publicUrl") ?? "").trim().replace(/\/+$/, "");
@@ -305,30 +185,6 @@ export async function adminAction(_prev: ActionState, formData: FormData): Promi
       break;
     }
 
-    /* ---------------- backups ---------------- */
-    case "backup.config": {
-      const { saveBackupConfig } = await import("@/lib/backup");
-      const hour = intOrNull(formData.get("hour"), 0, 23);
-      const chatId = String(formData.get("chatId") ?? "").trim();
-      if (chatId && !/^-?\d{3,}$/.test(chatId)) return { error: "invalidInput" };
-      await saveBackupConfig({
-        enabled: formData.get("enabled") === "on",
-        ...(hour !== null ? { hour } : {}),
-        ...(chatId ? { chatId } : {}),
-      });
-      await audit("backup.config", { details: `enabled=${formData.get("enabled") === "on"} hour=${hour ?? "-"} chat=${chatId || "-"}` });
-      break;
-    }
-    case "backup.run": {
-      const { runBackup } = await import("@/lib/backup");
-      after(async () => {
-        const result = await runBackup("manual");
-        await audit(result.ok ? "backup.manual" : "backup.manual_failed", {
-          details: result.ok ? `parts=${result.parts} bytes=${result.bytes}` : result.error ?? "",
-        }).catch(() => undefined);
-      });
-      break;
-    }
     default:
       return { error: "invalidInput" };
   }

@@ -167,14 +167,6 @@ export async function deleteAccountAction(_prev: ActionState, formData: FormData
     return { error: "currentPasswordWrong" };
   }
 
-  // Tell a linked Telegram chat BEFORE the link row disappears with the cascade.
-  try {
-    const { notifyAccountDeletion } = await import("@/lib/account-deletion");
-    await notifyAccountDeletion(user.id, user.username);
-  } catch {
-    /* best effort */
-  }
-
   // Anonymize this user's guest messages in rooms they did NOT own, so the
   // conversation history of other people stops carrying their identity.
   const memberRooms = db
@@ -193,7 +185,7 @@ export async function deleteAccountAction(_prev: ActionState, formData: FormData
     .values({ userId: user.id, username: user.username })
     .onConflictDoNothing();
 
-  // Rooms, members, files, sessions, 2FA and the Telegram link cascade with the user.
+  // Rooms, members, files, sessions and 2FA cascade with the user.
   await db.delete(users).where(eq(users.id, user.id));
   (await cookies()).delete(SESSION_COOKIE);
   redirect("/");

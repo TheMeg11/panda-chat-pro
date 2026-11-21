@@ -8,7 +8,6 @@ CREATE TABLE IF NOT EXISTS users (
   display_name varchar(64) NOT NULL,
   password_hash text NOT NULL,
   status varchar(16) NOT NULL DEFAULT 'active',
-  can_use_telegram boolean NOT NULL DEFAULT true,
   max_rooms integer,
   created_at timestamptz NOT NULL DEFAULT now(),
   last_login_at timestamptz
@@ -102,7 +101,6 @@ CREATE TABLE IF NOT EXISTS messages (
   file_mime varchar(100),
   file_size integer,
   reply_to_id bigint,
-  tg_message_id bigint,
   deleted_at timestamptz,
   -- Self-destruct deadline (set from room default_ttl or per-send override).
   expires_at timestamptz,
@@ -111,7 +109,6 @@ CREATE TABLE IF NOT EXISTS messages (
   created_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS messages_room_id_idx ON messages (room_id, id);
-CREATE INDEX IF NOT EXISTS messages_tg_idx ON messages (room_id, tg_message_id);
 CREATE INDEX IF NOT EXISTS messages_expires_idx ON messages (expires_at) WHERE expires_at IS NOT NULL;
 
 -- ----------------------------------------------------------------
@@ -173,31 +170,6 @@ CREATE TABLE IF NOT EXISTS deleted_accounts (
   deleted_at timestamptz NOT NULL DEFAULT now()
 );
 
--- (telegram_links fallback_room_id / allow_bot_dm columns are added AFTER the
--- telegram_links table is created below — forward references break empty DBs.)
-
-CREATE TABLE IF NOT EXISTS telegram_bots (
-  room_id uuid PRIMARY KEY REFERENCES rooms(id) ON DELETE CASCADE,
-  token_encrypted text NOT NULL,
-  token_hint varchar(32) NOT NULL,
-  bot_id varchar(32) NOT NULL UNIQUE,
-  bot_username varchar(64) NOT NULL,
-  bot_name varchar(128) NOT NULL DEFAULT '',
-  admin_chat_id varchar(32),
-  admin_chat_name varchar(128),
-  link_code varchar(64),
-  forward_enabled boolean NOT NULL DEFAULT true,
-  mode varchar(16) NOT NULL DEFAULT 'polling',
-  webhook_secret varchar(64) NOT NULL,
-  update_offset bigint NOT NULL DEFAULT 0,
-  status varchar(16) NOT NULL DEFAULT 'pending',
-  last_error text,
-  base_url varchar(256),
-  last_update_at timestamptz,
-  created_at timestamptz NOT NULL DEFAULT now(),
-  updated_at timestamptz NOT NULL DEFAULT now()
-);
-
 CREATE TABLE IF NOT EXISTS platform_settings (
   key varchar(64) PRIMARY KEY,
   value jsonb NOT NULL,
@@ -215,70 +187,33 @@ CREATE TABLE IF NOT EXISTS audit_logs (
 );
 CREATE INDEX IF NOT EXISTS audit_created_idx ON audit_logs (created_at);
 
--- Official platform bot: links a Panda Chat account to a private Telegram chat.
-CREATE TABLE IF NOT EXISTS telegram_links (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id uuid NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
-  chat_id varchar(32) NOT NULL UNIQUE,
-  chat_name varchar(128) NOT NULL DEFAULT '',
-  username varchar(64),
-  active_room_id uuid REFERENCES rooms(id) ON DELETE SET NULL,
-  forward_enabled boolean NOT NULL DEFAULT true,
-  muted_rooms jsonb NOT NULL DEFAULT '[]'::jsonb,
-  created_at timestamptz NOT NULL DEFAULT now(),
-  updated_at timestamptz NOT NULL DEFAULT now()
-);
-CREATE INDEX IF NOT EXISTS telegram_links_user_idx ON telegram_links (user_id);
-
--- Telegram links: per-user fallback destination + bot-DM consent.
--- (Must come AFTER CREATE TABLE telegram_links above so this is valid on an empty DB.)
-ALTER TABLE telegram_links ADD COLUMN IF NOT EXISTS fallback_room_id uuid REFERENCES rooms(id) ON DELETE SET NULL;
-ALTER TABLE telegram_links ADD COLUMN IF NOT EXISTS allow_bot_dm boolean NOT NULL DEFAULT false;
-
--- Short-lived /start <code> pairing codes (browser -> Telegram).
-CREATE TABLE IF NOT EXISTS telegram_link_codes (
-  code varchar(64) PRIMARY KEY,
-  user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  created_at timestamptz NOT NULL DEFAULT now(),
-  expires_at timestamptz NOT NULL
-);
-
 -- ----------------------------------------------------------------
--- v1.5.0 additions (profile, unread, offline notify, GIFs, password
--- reset) — all idempotent. Every table referenced below (users,
--- room_members, messages, telegram_links) is created above.
+-- v1.5.0 additions (profile, unread, GIFs) — all idempotent. Every
+-- table referenced below (users, room_members, messages) is created above.
 -- ----------------------------------------------------------------
 
 -- Optional public profile description (max 280 chars).
 ALTER TABLE users ADD COLUMN IF NOT EXISTS bio varchar(280);
 
--- Telegram-verified password reset codes (sha256(salt+code) hashes only).
-CREATE TABLE IF NOT EXISTS password_resets (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  code_hash text NOT NULL,
-  expires_at timestamptz NOT NULL,
-  used_at timestamptz,
-  attempts integer NOT NULL DEFAULT 0,
-  created_at timestamptz NOT NULL DEFAULT now()
-);
-CREATE INDEX IF NOT EXISTS password_resets_user_idx ON password_resets (user_id);
-
--- Unread tracking + offline-notify dedupe on room membership.
+-- Unread tracking on room membership.
 ALTER TABLE room_members ADD COLUMN IF NOT EXISTS last_read_at timestamptz;
-ALTER TABLE room_members ADD COLUMN IF NOT EXISTS tg_notified_at timestamptz;
 
 -- GIF messages: Giphy media id, rendered through the server proxy route.
 ALTER TABLE messages ADD COLUMN IF NOT EXISTS gif_id varchar(64);
 
--- Digest ping when a linked user has been away for 15+ minutes.
-ALTER TABLE telegram_links ADD COLUMN IF NOT EXISTS offline_notify boolean NOT NULL DEFAULT false;
--- v1.6.0: new links get the offline digest unless they opt out (existing rows keep their value).
-ALTER TABLE telegram_links ALTER COLUMN offline_notify SET DEFAULT true;
-
--- Per-user platform-announcement delivery via the bot (v1.6.0).
-ALTER TABLE telegram_links ADD COLUMN IF NOT EXISTS announce_enabled boolean NOT NULL DEFAULT true;
-ALTER TABLE telegram_links ADD COLUMN IF NOT EXISTS announced_at timestamptz;
+-- ----------------------------------------------------------------
+-- v2.6.0 — Telegram integration removed (web-only chat). Dead
+-- tables/columns are dropped for existing installs; fresh databases
+-- simply never create them.
+-- ----------------------------------------------------------------
+DROP TABLE IF EXISTS telegram_link_codes;
+DROP TABLE IF EXISTS telegram_links;
+DROP TABLE IF EXISTS telegram_bots;
+DROP TABLE IF EXISTS password_resets;
+DROP INDEX IF EXISTS messages_tg_idx;
+ALTER TABLE messages DROP COLUMN IF EXISTS tg_message_id;
+ALTER TABLE room_members DROP COLUMN IF EXISTS tg_notified_at;
+ALTER TABLE users DROP COLUMN IF EXISTS can_use_telegram;
 
 -- Profile avatar bytes (one per account; a new upload replaces the old row).
 CREATE TABLE IF NOT EXISTS user_avatars (

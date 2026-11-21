@@ -4,7 +4,7 @@ import { useActionState, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { RefreshCw } from "lucide-react";
 import { login2faAction, loginAction, registerAction } from "@/app/actions/auth";
-import { confirmPasswordResetAction, requestPasswordResetAction } from "@/app/actions/password-reset";
+import { confirmPasswordResetAction } from "@/app/actions/password-reset";
 import { useI18n } from "./i18n-provider";
 import { errorText, tr } from "@/lib/i18n";
 import { ActionForm, PasswordInput, SubmitButton } from "./ui";
@@ -230,87 +230,24 @@ export function LoginForm() {
 }
 
 /**
- * Password recovery via the linked official Telegram bot.
- * Step 1 asks for the username — the server ALWAYS answers with the same
- * generic message (anti-enumeration). Step 2 verifies the 6-digit code and
- * sets a fresh password, which signs the account out everywhere.
+ * Password recovery with a SIGNUP RECOVERY CODE (web-only, v2.6.0).
+ *
+ * One single step: username + one of the 10 one-time codes shown at signup
+ * + a fresh password. On success every session of the account is revoked.
  */
 export function ForgotPasswordForm() {
   const { t } = useI18n();
-  const [state, formAction, pending] = useActionState<ActionState, FormData>(requestPasswordResetAction, {});
-  const [state2, formAction2, pending2] = useActionState<ActionState, FormData>(confirmPasswordResetAction, {});
-  const [username, setUsername] = useState("");
-
-  if (state2.ok) {
-    return (
-      <>
-        <p role="status" className="notice notice-mint pop-in">
-          {tr(t, state2.message)}
-        </p>
-        <Link href="/login" className="btn btn-primary btn-lg mt-5 w-full">
-          {t.auth.submitLogin}
-        </Link>
-      </>
-    );
-  }
+  const [state, formAction, pending] = useActionState<ActionState, FormData>(confirmPasswordResetAction, {});
 
   if (state.ok) {
     return (
       <>
-        <form action={formAction2} className="space-y-5">
-          <p role="status" className="notice notice-mint pop-in">
-            {tr(t, state.message)}
-          </p>
-          <input type="hidden" name="username" value={username} />
-          <div>
-            <label className="label" htmlFor="resetCode">
-              {t.auth.resetCode}
-            </label>
-            <input
-              id="resetCode"
-              name="code"
-              className="input text-center font-mono text-lg tracking-[0.3em]"
-              autoComplete="one-time-code"
-              inputMode="numeric"
-              pattern="[0-9]{6}"
-              maxLength={6}
-              minLength={6}
-              required
-              autoFocus
-              dir="ltr"
-              placeholder="••••••"
-            />
-            <p className="hint">{t.auth.resetCodeHint}</p>
-          </div>
-          <div>
-            <label className="label" htmlFor="newPassword">
-              {t.auth.resetNewPassword}
-            </label>
-            <PasswordInput name="newPassword" autoComplete="new-password" minLength={8} />
-            <p className="hint">{t.auth.passwordHint}</p>
-          </div>
-          <div>
-            <label className="label" htmlFor="confirm">
-              {t.auth.confirmPassword}
-            </label>
-            <PasswordInput name="confirm" autoComplete="new-password" minLength={8} />
-          </div>
-          {state2.error ? (
-            <p role="alert" className="notice notice-rose pop-in">
-              {errorText(t, state2.error)}
-            </p>
-          ) : null}
-          <button type="submit" className="btn btn-primary btn-lg w-full" disabled={pending2} aria-busy={pending2}>
-            {pending2 ? <span className="spinner" aria-hidden="true" /> : null}
-            {t.auth.resetConfirmSubmit}
-          </button>
-        </form>
-        <p className="mt-7 text-center text-sm text-muted">
-          {t.auth.haveAccount}{" "}
-          <Link href="/login" className="font-bold text-accent-ink hover:underline">
-            {t.auth.loginInstead}
-          </Link>
+        <p role="status" className="notice notice-mint pop-in">
+          {tr(t, state.message)}
         </p>
+        <Link href="/login" className="btn btn-primary btn-lg mt-5 w-full">
+          {t.auth.submitLogin}
+        </Link>
       </>
     );
   }
@@ -335,10 +272,37 @@ export function ForgotPasswordForm() {
             pattern="[A-Za-z0-9_.]{3,32}"
             dir="ltr"
             placeholder={t.auth.usernamePlaceholder}
-            value={username}
-            onChange={(e) => setUsername(e.target.value)}
           />
           <p className="hint">{t.auth.usernameHint}</p>
+        </div>
+        <div>
+          <label className="label" htmlFor="resetCode">
+            {t.auth.resetCode}
+          </label>
+          <input
+            id="resetCode"
+            name="code"
+            className="input text-center font-mono tracking-[0.12em]"
+            autoComplete="one-time-code"
+            required
+            autoFocus
+            dir="ltr"
+            placeholder={t.auth.resetCodePlaceholder}
+          />
+          <p className="hint">{t.auth.resetCodeHint}</p>
+        </div>
+        <div>
+          <label className="label" htmlFor="newPassword">
+            {t.auth.resetNewPassword}
+          </label>
+          <PasswordInput name="newPassword" autoComplete="new-password" minLength={8} />
+          <p className="hint">{t.auth.passwordHint}</p>
+        </div>
+        <div>
+          <label className="label" htmlFor="confirm">
+            {t.auth.confirmPassword}
+          </label>
+          <PasswordInput name="confirm" autoComplete="new-password" minLength={8} />
         </div>
         {state.error ? (
           <p role="alert" className="notice notice-rose pop-in">
@@ -347,7 +311,7 @@ export function ForgotPasswordForm() {
         ) : null}
         <button type="submit" className="btn btn-primary btn-lg w-full" disabled={pending} aria-busy={pending}>
           {pending ? <span className="spinner" aria-hidden="true" /> : null}
-          {t.auth.resetSubmit}
+          {t.auth.resetConfirmSubmit}
         </button>
       </form>
       <p className="mt-7 text-center text-sm text-muted">

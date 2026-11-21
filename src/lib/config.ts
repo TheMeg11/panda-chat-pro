@@ -41,8 +41,6 @@ export type AppConfig = {
   tutorialEnabled: boolean;
   /** CSP in report-only mode while tightening (see next.config.ts) */
   cspReportOnly: boolean;
-  /** shared secret expected in x-telegram-bot-api-secret-token for webhooks */
-  webhookSecret: string | null;
   /** default TTL options offered for self-destructing messages (seconds) */
   selfDestructOptions: number[];
 };
@@ -116,7 +114,6 @@ export function getConfig(): AppConfig {
     e2eeEnabled: bool(process.env.E2EE_ENABLED, true),
     tutorialEnabled: bool(process.env.TUTORIAL_ENABLED, true),
     cspReportOnly: bool(process.env.CSP_REPORT_ONLY, false),
-    webhookSecret: (process.env.WEBHOOK_SECRET ?? "").trim() || null,
     selfDestructOptions: [3600, 86_400, 7 * 86_400],
   };
   return cached;

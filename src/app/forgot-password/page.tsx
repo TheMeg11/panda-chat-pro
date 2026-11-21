@@ -6,9 +6,9 @@ import { getI18n } from "@/lib/i18n-server";
 export const dynamic = "force-dynamic";
 
 /**
- * Pre-login page: password recovery via the linked official Telegram bot.
- * No session required — and no session leak either: the answer is always the
- * same generic message regardless of whether the account exists.
+ * Pre-login page: password recovery with a signup recovery code (web-only).
+ * No session required — and no session leak either: a wrong code and an
+ * unknown username produce the same generic error.
  */
 export async function generateMetadata(): Promise<Metadata> {
   const { t } = await getI18n();

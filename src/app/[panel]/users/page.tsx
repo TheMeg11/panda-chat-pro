@@ -59,14 +59,13 @@ export default async function AdminUsers({
                 <th>{t.admin.colUser}</th>
                 <th>{t.admin.colStatus}</th>
                 <th>{t.admin.colRooms}</th>
-                <th>{t.admin.colTelegram}</th>
                 <th>{t.admin.colJoined}</th>
                 <th>{t.admin.colLastLogin}</th>
                 <th />
               </tr>
             </thead>
             <tbody>
-              {list.length === 0 ? <EmptyRow colSpan={7} text={t.admin.empty} /> : null}
+              {list.length === 0 ? <EmptyRow colSpan={6} text={t.admin.empty} /> : null}
               {list.map(({ user, roomCount }) => (
                 <tr key={user.id}>
                   <td>
@@ -86,11 +85,6 @@ export default async function AdminUsers({
                     </span>
                   </td>
                   <td className="font-bold text-ink-2">{formatNumber(roomCount, lang)}</td>
-                  <td>
-                    <span className={`badge ${user.canUseTelegram ? "badge-sky" : "badge-neutral"}`}>
-                      {user.canUseTelegram ? t.common.enabled : t.common.disabled}
-                    </span>
-                  </td>
                   <td className="whitespace-nowrap text-muted">
                     <LocalTime iso={user.createdAt.toISOString()} mode="date" />
                   </td>

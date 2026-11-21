@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { and, eq, isNotNull, ne, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { rooms, roomMembers, telegramLinks, userBlocks } from "@/db/schema";
+import { rooms, roomMembers, userBlocks } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
 import { hashPassword } from "@/lib/crypto";
 import {
@@ -21,7 +21,6 @@ import {
   setRoomPassword,
 } from "@/lib/rooms";
 import { getSettings, roomLimitFor } from "@/lib/settings";
-import { linkForUser, sendTestToOwner } from "@/lib/telegram/service";
 import type { ActionState } from "@/lib/utils";
 
 export async function createRoomAction(_prev: ActionState, formData: FormData): Promise<ActionState> {
@@ -112,27 +111,6 @@ export async function roomAction(_prev: ActionState, formData: FormData): Promis
       const member = await setMemberStatus(room.id, String(formData.get("memberId") ?? ""), op === "kick" ? "banned" : "active");
       if (!member) return { error: "notFound" };
       return done(op === "kick" ? "room.memberRemoved" : "room.memberRestored");
-    }
-    case "tgMute": {
-      const link = await linkForUser(user.id);
-      if (!link) return { error: "telegramNotLinked" };
-      const muted = link.mutedRooms.includes(room.id);
-      await db
-        .update(telegramLinks)
-        .set({
-          mutedRooms: muted ? link.mutedRooms.filter((r) => r !== room.id) : [...link.mutedRooms, room.id],
-          updatedAt: new Date(),
-        })
-        .where(eq(telegramLinks.userId, user.id));
-      return done(muted ? "room.tgUnmuted" : "room.tgMuted");
-    }
-    case "tgTest": {
-      if (!settings.telegramEnabled) return { error: "telegramDisabled" };
-      if (settings.telegramPaid && !user.canUseTelegram) return { error: "telegramNotAllowed" };
-      const result = await sendTestToOwner(room.id);
-      if (result === "nolink") return { error: "telegramNotLinked" };
-      if (result === "error") return { error: "telegramUnreachable" };
-      return done("room.tgTestSent");
     }
     case "delete":
       await db.delete(rooms).where(eq(rooms.id, room.id));

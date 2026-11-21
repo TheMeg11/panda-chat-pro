@@ -1,9 +1,9 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { Send, KeyRound, MessageCircle, RefreshCw, Settings2, Trash2, Unplug, Users } from "lucide-react";
+import { KeyRound, MessageCircle, RefreshCw, Settings2, Trash2, Users } from "lucide-react";
 import { and, desc, eq, isNull, ne } from "drizzle-orm";
 import { db } from "@/db";
-import { messages, roomMembers, rooms, telegramBots, telegramLinks, users } from "@/db/schema";
+import { messages, roomMembers, rooms, users } from "@/db/schema";
 import { adminAction } from "@/app/actions/admin";
 import { EmptyRow, PageHeader, Section, TableWrap } from "@/components/admin/parts";
 import { Avatar } from "@/components/brand";
@@ -29,7 +29,7 @@ export default async function AdminRoomDetail({ params }: { params: Promise<{ pa
   if (!row) notFound();
   const { room, owner } = row;
   const { t } = await getI18n();
-  const [baseUrl, members, recent, botRows, ownerLink] = await Promise.all([
+  const [baseUrl, members, recent] = await Promise.all([
     getBaseUrl(),
     db.select().from(roomMembers).where(eq(roomMembers.roomId, room.id)).orderBy(desc(roomMembers.lastSeenAt)).limit(300),
     db
@@ -38,11 +38,7 @@ export default async function AdminRoomDetail({ params }: { params: Promise<{ pa
       .where(and(eq(messages.roomId, room.id), isNull(messages.deletedAt), ne(messages.authorRole, "system")))
       .orderBy(desc(messages.id))
       .limit(50),
-    db.select().from(telegramBots).where(eq(telegramBots.roomId, room.id)).limit(1),
-    db.select().from(telegramLinks).where(eq(telegramLinks.userId, room.ownerId)).limit(1),
   ]);
-  const bot = botRows[0];
-  const link = ownerLink[0];
   const inviteUrl = `${baseUrl}/r/${room.inviteToken}`;
 
   return (
@@ -142,47 +138,6 @@ export default async function AdminRoomDetail({ params }: { params: Promise<{ pa
         </Section>
       </div>
 
-      <Section title={t.admin.integration} icon={Send} tone="bg-sky-soft text-sky-ink" className="mt-6">
-        {link ? (
-          <div className="flex flex-wrap items-center justify-between gap-4 p-5">
-            <div className="grid gap-x-8 gap-y-2 text-sm sm:grid-cols-2">
-              <p>
-                <span className="text-muted">{t.admin.colChat}: </span>
-                <b dir="auto">{link.chatName}</b>
-                {link.username ? <span className="text-muted" dir="ltr"> · @{link.username}</span> : null}
-              </p>
-              <p>
-                <span className="text-muted">{t.admin.colForwarding}: </span>
-                <span className={`badge ${link.forwardEnabled && !link.mutedRooms.includes(room.id) ? "badge-mint" : "badge-neutral"}`}>
-                  {link.forwardEnabled ? (link.mutedRooms.includes(room.id) ? t.admin.forwardMuted : t.admin.forwardOn) : t.admin.forwardPaused}
-                </span>
-              </p>
-              <p>
-                <span className="text-muted">{t.admin.colLinked}: </span>
-                <span dir="ltr">{link.chatId}</span>
-              </p>
-            </div>
-            <ActionButton action={adminAction} fields={{ op: "link.unlink", id: link.id }} confirm={t.admin.unlinkConfirm} className="btn btn-danger btn-sm">
-              <Unplug className="size-4" />
-              {t.admin.unlink}
-            </ActionButton>
-          </div>
-        ) : (
-          <p className="p-5 text-sm text-muted">{t.admin.noIntegration}</p>
-        )}
-        {bot ? (
-          <div className="flex flex-wrap items-center justify-between gap-4 border-t border-line p-5">
-            <p className="text-xs text-muted">
-              {t.admin.legacyBot} — <b dir="ltr">@{bot.botUsername}</b> ({bot.tokenHint})
-            </p>
-            <ActionButton action={adminAction} fields={{ op: "bot.disconnect", id: room.id }} confirm={t.admin.disconnectConfirm} className="btn btn-secondary btn-sm">
-              <RefreshCw className="size-4" />
-              {t.admin.disconnect}
-            </ActionButton>
-          </div>
-        ) : null}
-      </Section>
-
       <Section title={t.admin.roomMembers} icon={Users} tone="bg-mint-soft text-mint-ink" className="mt-6">
         <TableWrap>
           <table className="table">
@@ -260,7 +215,6 @@ export default async function AdminRoomDetail({ params }: { params: Promise<{ pa
                     {msg.authorName}
                   </b>
                   {msg.authorRole === "owner" ? <span className="badge badge-accent">{t.common.owner}</span> : null}
-                  {msg.source === "telegram" ? <span className="badge badge-sky">Telegram</span> : null}
                   <LocalTime iso={msg.createdAt.toISOString()} className="text-faint" />
                 </p>
                 <p className="mt-1 whitespace-pre-wrap break-words text-sm text-ink-2" dir="auto">

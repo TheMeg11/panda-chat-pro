@@ -62,7 +62,7 @@ export async function getBaseUrl(): Promise<string> {
  *  3. Missing Origin is only tolerated when Sec-Fetch-Site is absent or
  *     explicitly "none" — a plain cross-site request without Origin cannot
  *     carry ambient cookies in practice.
- * Non-browser clients (Telegram webhooks, curl) never send Sec-Fetch-Site and
+ * Non-browser clients (curl, scripts) never send Sec-Fetch-Site and
  * are authenticated by their own secrets instead.
  */
 export function isSameOrigin(req: Request): boolean {

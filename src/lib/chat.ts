@@ -5,7 +5,7 @@ import { messages, roomMembers, rooms, files, userBlocks, type Message, type Roo
 /**
  * v1.7.0 — thrown by postMessage when a DM is frozen by a block row between
  * the two participants (either direction). The web API pre-checks and answers
- * `dmBlocked`; the Telegram paths catch it and reply a short notice.
+ * `dmBlocked`.
  */
 export class BlockedDmError extends Error {
   constructor() {
@@ -62,7 +62,7 @@ export type ChatMessage = {
   body: string;
   authorName: string;
   authorRole: "owner" | "guest" | "system";
-  source: "web" | "telegram" | "system";
+  source: "web" | "system";
   memberId: string | null;
   createdAt: string;
   mine: boolean;
@@ -210,7 +210,7 @@ function serialize(r: Message, viewer: Viewer, replies: Map<number, NonNullable<
     body: r.body,
     authorName: r.authorName,
     authorRole: (["owner", "guest", "system"].includes(r.authorRole) ? r.authorRole : "guest") as ChatMessage["authorRole"],
-    source: (["web", "telegram", "system"].includes(r.source) ? r.source : "web") as ChatMessage["source"],
+    source: (r.source === "system" ? "system" : "web") as ChatMessage["source"],
     memberId: r.memberId,
     createdAt: r.createdAt.toISOString(),
     mine,
@@ -248,7 +248,7 @@ export async function postMessage(
   author: Viewer & { authorName: string },
   body: string,
   replyToId: number | null,
-  source: "web" | "telegram",
+  source: "web",
   fileId: string | null = null,
   opts: { ttlSeconds?: number | null; encrypted?: boolean; gifId?: string } = {},
 ): Promise<Message> {

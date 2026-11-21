@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { KeyRound, LogOut, MessagesSquare, ShieldCheck, Trash2 } from "lucide-react";
 import { and, desc, eq, gt, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { rooms, sessions, telegramLinks, users } from "@/db/schema";
+import { rooms, sessions, users } from "@/db/schema";
 import { adminAction } from "@/app/actions/admin";
 import { EmptyRow, PageHeader, Section, TableWrap } from "@/components/admin/parts";
 import { Avatar } from "@/components/brand";
@@ -27,9 +27,8 @@ export default async function AdminUserDetail({ params }: { params: Promise<{ pa
   const [settings, owned, [sess]] = await Promise.all([
     getSettings(),
     db
-      .select({ room: rooms, linked: telegramLinks.chatId })
+      .select({ room: rooms })
       .from(rooms)
-      .leftJoin(telegramLinks, eq(telegramLinks.userId, rooms.ownerId))
       .where(eq(rooms.ownerId, user.id))
       .orderBy(desc(rooms.lastActivityAt)),
     db
@@ -74,13 +73,6 @@ export default async function AdminUserDetail({ params }: { params: Promise<{ pa
                 <option value="suspended">{t.admin.statusSuspended}</option>
               </select>
             </div>
-            <label className="flex items-center justify-between gap-3 rounded-xl border border-line bg-surface-2 px-4 py-3">
-              <span className="min-w-0">
-                <span className="block text-sm font-bold text-ink">{t.admin.canUseTelegram}</span>
-                <span className="mt-0.5 block text-xs font-semibold text-muted">{t.admin.canUseTelegramHint}</span>
-              </span>
-              <input type="checkbox" name="canUseTelegram" className="switch" defaultChecked={user.canUseTelegram} />
-            </label>
             <div>
               <label className="label" htmlFor="maxRooms">
                 {t.admin.roomLimit}
@@ -143,7 +135,7 @@ export default async function AdminUserDetail({ params }: { params: Promise<{ pa
             </thead>
             <tbody>
               {owned.length === 0 ? <EmptyRow colSpan={5} text={t.admin.empty} /> : null}
-              {owned.map(({ room, linked }) => (
+              {owned.map(({ room }) => (
                 <tr key={room.id}>
                   <td className="max-w-64 truncate font-bold text-ink" dir="auto">
                     {room.name}
@@ -153,7 +145,6 @@ export default async function AdminUserDetail({ params }: { params: Promise<{ pa
                       {room.passwordHash ? <span className="badge badge-accent">{t.admin.filterProtected}</span> : null}
                       {room.isLocked ? <span className="badge badge-amber">{t.admin.filterLocked}</span> : null}
                       {room.isDisabled ? <span className="badge badge-rose">{t.admin.filterDisabled}</span> : null}
-                      {linked ? <span className="badge badge-sky">✈ {t.admin.filterTelegram}</span> : null}
                     </div>
                   </td>
                   <td className="text-muted" dir="ltr">

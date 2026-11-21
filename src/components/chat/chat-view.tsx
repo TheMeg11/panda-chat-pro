@@ -27,7 +27,6 @@ import {
   Timer,
   Unlock,
   Reply,
-  Send,
   ShieldAlert,
   Trash2,
   Video,
@@ -1236,11 +1235,6 @@ export function ChatView({
                         </span>
                       ) : null}
                       <span className={cn("mt-0.5 flex items-center justify-end gap-1 text-[10.5px] leading-4", mine ? "opacity-60" : "text-faint")}>
-                        {m.source === "telegram" ? (
-                          <span title={t.chat.viaTelegram} className="inline-flex">
-                            <Send className="size-3" aria-label={t.chat.viaTelegram} />
-                          </span>
-                        ) : null}
                         <time dateTime={m.createdAt}>{hydrated ? formatDate(m.createdAt, lang, { hour: "2-digit", minute: "2-digit", hour12: lang !== "fa" }) : ""}</time>
                       </span>
                     </div>

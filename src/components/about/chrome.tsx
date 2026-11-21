@@ -29,7 +29,6 @@ export const SECTIONS: { id: string; label: string; en: string; icon: Icon }[] =
   { id: "messaging", label: "گفتگو و پیام‌ها", en: "Messaging", icon: MessagesSquare },
   { id: "private", label: "گفتگوی خصوصی و چت مخفی", en: "Private & hidden chats", icon: AtSign },
   { id: "moderation", label: "مدیریت اتاق", en: "Room management", icon: Wrench },
-  { id: "telegram", label: "ربات تلگرام", en: "Telegram bot", icon: Bot },
   { id: "account", label: "حساب کاربری و نشست‌ها", en: "Account & sessions", icon: CircleUser },
   { id: "security", label: "امنیت و حریم خصوصی", en: "Security & privacy", icon: ShieldCheck },
   { id: "app", label: "اپلیکیشن، ظاهر و زبان", en: "App, looks & language", icon: MonitorSmartphone },

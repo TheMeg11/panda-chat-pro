@@ -8,8 +8,8 @@ import { gunzipSync, gzipSync } from "node:zlib";
  * The ciphertext is AES-256-GCM over the gzipped backup JSON. AAD binds the
  * magic + version so the header cannot be tampered with.
  *
- * The key comes from BACKUP_ENCRYPTION_KEY (recommended: kept OUT of Telegram
- * and the server env — e.g. printed and stored offline) or is derived from
+ * The key comes from BACKUP_ENCRYPTION_KEY (recommended: kept OUT of the
+ * server env — e.g. printed and stored offline) or is derived from
  * APP_SECRET with a domain-separated label so it is never equal to any other
  * key the app uses. Key rotation: set BACKUP_ENCRYPTION_KEY — old archives
  * stay decryptable only with the old key, which is why the admin should keep

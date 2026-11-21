@@ -6,9 +6,9 @@
  * The register action redirects to /dashboard?welcome=1&codes=… with the ten
  * freshly minted account-recovery codes. They are displayed ONCE here (the
  * URL is stripped from history afterwards — a refresh shows nothing), because
- * from then on only their sha256 hashes exist server-side. Without a linked
- * Telegram, these codes are the only way back into a forgotten-password
- * account, so the banner is deliberately loud and offers a download.
+ * from then on only their sha256 hashes exist server-side. These codes are
+ * the only way back into a forgotten-password account, so the banner is
+ * deliberately loud and offers a download.
  */
 
 import { useEffect, useState } from "react";

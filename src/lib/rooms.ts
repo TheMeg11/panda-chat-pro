@@ -240,7 +240,7 @@ export async function roomCounters(roomIds: string[]) {
 /*                                                                     */
 /* A DM is a normal room row with type="dm" whose two participants are  */
 /* both "owner"-role members (device hash "owner:<userId>"). This reuses */
-/* the whole message/file/telegram pipeline unchanged while keeping the */
+/* the whole message/file pipeline unchanged while keeping the */
 /* chat strictly private: no invite link, no password, no guests.       */
 /* ------------------------------------------------------------------ */
 
