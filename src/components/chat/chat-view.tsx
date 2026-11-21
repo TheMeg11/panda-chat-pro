@@ -1587,7 +1587,14 @@ export function ChatView({
                   ? t.chat.micDenied
                   : voice.micError === "busy"
                     ? t.chat.micBusy
-                    : t.chat.micUnsupported}
+                    : voice.micError === "empty"
+                      ? t.chat.micEmpty
+                      : t.chat.micUnsupported}
+                {voice.micDetail ? (
+                  <span className="ms-1 font-mono text-[10px] text-faint" dir="ltr">
+                    [{voice.micDetail}]
+                  </span>
+                ) : null}
               </span>
             ) : error ? (
               <span className="flex items-center gap-2">

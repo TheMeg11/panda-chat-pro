@@ -35,7 +35,7 @@ export function formatSecs(total: number): string {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 }
 
-export type MicError = "denied" | "busy" | "unsupported";
+export type MicError = "denied" | "busy" | "unsupported" | "empty";
 
 /** Map a recorder/getUserMedia failure to a precise, honest message — a
  * granted permission that still fails is NOT "permission denied". */
@@ -153,6 +153,17 @@ export function useVoiceRecorder() {
 
   const finish = useCallback(
     (blob: Blob, secs: number) => {
+      // A header-only blob (suspended AudioContext, device quirks) would only
+      // bounce off the server with a cryptic "file type" error — fail honestly
+      // here instead.
+      if (blob.size < 512) {
+        cleanupStream();
+        clearTimer();
+        setMicError("empty");
+        setMicDetail(`empty blob (${blob.size}B)`);
+        setPhase("idle");
+        return;
+      }
       blobRef.current = blob;
       setUrl((old) => {
         if (old) URL.revokeObjectURL(old);
@@ -161,7 +172,7 @@ export function useVoiceRecorder() {
       setDuration(Math.max(1, secs));
       setPhase("review");
     },
-    [],
+    [cleanupStream, clearTimer],
   );
 
   const start = useCallback(async () => {
