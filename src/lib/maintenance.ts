@@ -1,6 +1,7 @@
 import { and, isNotNull, lt, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { adminSessions, auditLogs, files, messages, sessions } from "@/db/schema";
+import { isUserActive } from "./activity";
 import { audit } from "./audit";
 import { getConfig } from "./config";
 import { sweepRateLimitBuckets } from "./rate-limit";
@@ -20,6 +21,12 @@ import { sweepRateLimitBuckets } from "./rate-limit";
  *     (STORAGE_QUOTA_MB, default 800 MB), the OLDEST chat messages — and their
  *     attached files — are deleted in batches until usage falls back under the
  *     target line, so a full disk on Railway can never take the app down.
+ *
+ * Cost tier B/C (2026-11-21): recurring sweeps are IDLE-GATED — with no user
+ * activity within ACTIVE_WINDOW_MS the tick skips before any DB query, so a
+ * serverless container emits no outbound packets and can sleep. The FIRST
+ * run after boot stays ungated: it is the catch-up for time spent asleep
+ * (expired media, dead sessions, quota guard) and costs one pass per wake.
  */
 export function ensureMaintenance() {
   const g = globalThis as typeof globalThis & { __pcMaintenance?: boolean };
@@ -28,12 +35,16 @@ export function ensureMaintenance() {
   if (process.env.MAINTENANCE_LOOP === "off") return;
   g.__pcMaintenance = true;
 
+  let first = true;
   const run = () => {
+    const isBootCatchUp = first;
+    first = false;
+    if (!isBootCatchUp && !isUserActive()) return;
     void sweep().catch((error) => console.error("[panda-chat] maintenance sweep failed", error));
   };
-  const first = setTimeout(run, 30_000);
+  const firstTimer = setTimeout(run, 30_000);
   const timer = setInterval(run, 10 * 60_000);
-  (first as unknown as { unref?: () => void }).unref?.();
+  (firstTimer as unknown as { unref?: () => void }).unref?.();
   (timer as unknown as { unref?: () => void }).unref?.();
 }
 

@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { gunzipSync, gzipSync } from "node:zlib";
 import { desc, eq, sql } from "drizzle-orm";
 import { db } from "@/db";
+import { isUserActive } from "./activity";
 import {
   auditLogs,
   deletedAccounts,
@@ -345,7 +346,24 @@ export async function runBackup(reason: "scheduled" | "manual"): Promise<BackupR
   }
 }
 
-/** Nightly scheduler: ticks every minute, fires once per Tehran calendar day. */
+/**
+ * Nightly scheduler with first-wake catch-up (cost tier C, 2026-11-21).
+ *
+ * Old behaviour: tick every minute, fire inside the 10-minute window at the
+ * configured hour. On a sleeping (serverless) deployment that window is
+ * usually missed entirely — the container is simply not running at 03:00.
+ *
+ * New behaviour:
+ *  - a boot catch-up ~45s after every cold start: if today's backup is still
+ *    missing and the scheduled hour has already passed, it runs immediately
+ *    ("backup on first wake") — no user activity needed, waking up IS the
+ *    trigger;
+ *  - the recurring minute ticker stays for days with active usage, but is
+ *    IDLE-GATED (zero DB traffic while nobody is using the app) and retries
+ *    missed backups any time later in the day, not just inside the window;
+ *  - repeated failures back off exponentially (1→2→4…min, capped at 60min)
+ *    so an unreachable Telegram cannot hammer sendDocument all day.
+ */
 export function ensureBackupLoop() {
   const g2 = globalThis as typeof globalThis & { __pcBackupLoop?: boolean };
   if (g2.__pcBackupLoop) return;
@@ -353,7 +371,17 @@ export function ensureBackupLoop() {
   if (process.env.BACKUP_LOOP === "off") return;
   g2.__pcBackupLoop = true;
 
-  const tick = async () => {
+  let ticking = false;
+  let lastAttempt = 0;
+  let backoffMs = 0;
+
+  const tick = async (isBoot: boolean) => {
+    if (ticking) return;
+    // Idle gate FIRST — before any DB round-trip (bot token + config reads).
+    if (!isBoot && !isUserActive()) return;
+    if (lastAttempt && Date.now() - lastAttempt < backoffMs) return;
+    ticking = true;
+    lastAttempt = Date.now();
     try {
       if (!(await superadminBotToken())) return;
       const config = await getBackupConfig();
@@ -369,15 +397,24 @@ export function ensureBackupLoop() {
         .split(":");
       const hour = Number(hourStr);
       const minute = Number(minuteStr);
-      if (hour !== config.hour || minute >= 10) return;
+      // Due once the scheduled hour has passed (10 minutes into it, so an
+      // on-time ticker fire and a later catch-up can never double-run).
+      const due = hour > config.hour || (hour === config.hour && minute >= 10);
+      if (!due) return;
       const state = await readState();
       if (state.lastDate === tehranDateKey(now)) return;
-      await runBackup("scheduled");
+      const result = await runBackup("scheduled");
+      backoffMs = result.ok ? 0 : Math.min(60 * 60_000, Math.max(60_000, backoffMs * 2 || 60_000));
     } catch (error) {
       console.error("[panda-chat] backup tick failed", error);
+      backoffMs = Math.min(60 * 60_000, Math.max(60_000, backoffMs * 2 || 60_000));
+    } finally {
+      ticking = false;
     }
   };
-  const timer = setInterval(() => void tick(), 60_000);
+  const bootTimer = setTimeout(() => void tick(true), 45_000);
+  (bootTimer as unknown as { unref?: () => void }).unref?.();
+  const timer = setInterval(() => void tick(false), 60_000);
   (timer as unknown as { unref?: () => void }).unref?.();
 }
 

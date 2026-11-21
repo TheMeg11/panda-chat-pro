@@ -7,6 +7,10 @@ export async function register() {
   await ensureSchema();
   const { ensurePoller } = await import("./lib/telegram/poller");
   ensurePoller();
+  // Cost tier C: webhook mode replaces long polling — registration is
+  // idempotent and re-asserted on every cold start (see lib/telegram/webhook).
+  const { ensureWebhookMode } = await import("./lib/telegram/webhook");
+  ensureWebhookMode();
   const { ensureMaintenance } = await import("./lib/maintenance");
   ensureMaintenance();
   const { ensureBackupLoop } = await import("./lib/backup");

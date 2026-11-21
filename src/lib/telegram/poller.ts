@@ -1,3 +1,4 @@
+import { isUserActive, NOTIFY_WINDOW_MS } from "../activity";
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { platformSettings } from "@/db/schema";
@@ -39,12 +40,20 @@ function sleep(ms: number, signal: AbortSignal) {
  * as the poller loop — no second poller. It runs even when polling is disabled
  * (webhook deployments) because it only makes outbound sendMessage calls and
  * never consumes Telegram updates.
+ *
+ * Cost tier B/C (2026-11-21): the sweep is IDLE-GATED — while no user touched
+ * the app within NOTIFY_WINDOW_MS, the tick returns before its two settings
+ * lookups, so an idle serverless container emits zero outbound packets and
+ * can actually sleep. The window is wider than the digest's own 15-minute
+ * eligibility delay, so digests that become eligible shortly after the last
+ * web request still fire.
  */
 function ensureOfflineNotifySweep() {
   if (g.__pcOfflineSweep) return;
   g.__pcOfflineSweep = true;
   unref(
     setInterval(() => {
+      if (!isUserActive(NOTIFY_WINDOW_MS)) return;
       void sweepOfflineNotifications().catch((error) => console.error("[panda-chat] offline notify sweep failed", error));
       void sweepAnnouncements().catch((error) => console.error("[panda-chat] announcement sweep failed", error));
     }, 5 * 60_000),
@@ -60,7 +69,10 @@ export function ensurePoller() {
   g.__pcPoller = state;
   g.__pcPollerSync = () => void sync(state);
   unref(setTimeout(() => void sync(state), 1000));
-  unref(setInterval(() => void sync(state), 15_000));
+  // Cost tier B: 15s → 60s. Every tick costs two DB round-trips (settings +
+  // bot token), which on a serverless plan both adds load and keeps the
+  // container from ever sleeping. 60s still reacts to admin changes quickly.
+  unref(setInterval(() => void sync(state), 60_000));
 }
 
 export function pollerStatus() {
