@@ -40,7 +40,8 @@ import { useI18n } from "@/components/i18n-provider";
 import { useHydrated } from "@/components/ui";
 import { EmojiPicker } from "@/components/chat/emoji-picker";
 import { GifPicker } from "@/components/chat/gif-picker";
-import { useVoiceRecorder, VoiceBars, VoicePlayer, formatSecs } from "@/components/chat/voice";
+import { useVoiceRecorder, VoicePlayer, formatSecs } from "@/components/chat/voice";
+import { RecordingPill, MicStopButton } from "@/components/chat/voice-rec-pill";
 import {
   captureRows,
   cleanupGhosts,
@@ -166,6 +167,44 @@ export function ChatView({
   const [retryable, setRetryable] = useState(false);
   // v2.3.0 — Telegram-style voice recording (mic → stop/send/trash → send)
   const voice = useVoiceRecorder();
+  /* ---- v2.4.1 Animorio recording pill ---- */
+  const [pillClosing, setPillClosing] = useState(false);
+  const [pillElapsed, setPillElapsed] = useState(0);
+  const pillActionRef = useRef<"send" | "discard">("send");
+  const reducedMotionPillRef = useRef(false);
+  useEffect(() => {
+    try {
+      reducedMotionPillRef.current = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    } catch {
+      reducedMotionPillRef.current = false;
+    }
+  }, []);
+  /** Mic tapped again → collapse the pill, then finalize via the normal send path. */
+  const stopAndSend = () => {
+    if (voice.phase !== "recording") return;
+    pillActionRef.current = "send";
+    setPillElapsed(voice.elapsed);
+    setPillClosing(true);
+    voice.stop();
+  };
+  const discardRecording = () => {
+    if (voice.phase !== "recording") return;
+    pillActionRef.current = "discard";
+    setPillElapsed(voice.elapsed);
+    setPillClosing(true);
+    voice.discard();
+  };
+  const pillClosed = () => {
+    setPillClosing(false);
+    if (pillActionRef.current !== "send") return;
+    const f = voice.take();
+    voice.discard();
+    if (f) {
+      setPendingFile(f);
+      void send(f);
+    }
+  };
+
   /* ---- v2.4.0 premium message motion (fly-from-input + spring wave) ---- */
   const rowsRef = useRef<RowSnapshot[]>([]); // tops captured before each commit
   const prevIdsRef = useRef<number[]>(messages.map((m) => m.id));
@@ -594,16 +633,6 @@ export function ChatView({
    * guests and E2EE rooms, so the trigger is gated to authenticated members
    * of non-E2EE conversations (see the composer).
    */
-  /** Finalize the recording and hand it to the normal send path (also stored
-      in pendingFile so the retry affordance works on weak networks). */
-  const sendVoice = () => {
-    const f = voice.take();
-    if (!f) return;
-    voice.discard();
-    setPendingFile(f);
-    void send(f);
-  };
-
   const sendGif = async (gifId: string) => {
     if (sending) return;
     setSending(true);
@@ -1340,7 +1369,7 @@ export function ChatView({
                 void send();
               }}
               data-tutorial="composer"
-              className="flex items-end gap-2 rounded-2xl border border-line-strong bg-surface p-1.5 ps-2.5 transition focus-within:border-accent focus-within:shadow-[0_0_0_4px_var(--ring)]"
+              className="pc-composer flex items-end gap-2 rounded-2xl border border-line-strong bg-surface p-1.5 ps-2.5 transition focus-within:border-accent focus-within:shadow-[0_0_0_4px_var(--ring)]"
             >
               <input
                 ref={fileInputRef}
@@ -1481,28 +1510,18 @@ export function ChatView({
                 <option value="604800">{t.selfdestruct.oneWeek}</option>
               </select>
               ) : null}
-              {voice.phase === "recording" ? (
-                <div className="flex min-h-10 flex-1 items-center gap-2 px-1">
-                  <span className="rec-pulse size-2.5 shrink-0 rounded-full bg-rose-ink" aria-hidden="true" />
-                  <span className="text-sm font-bold tabular-nums text-rose-ink" dir="ltr">
-                    {formatSecs(voice.elapsed)}
-                  </span>
-                  <VoiceBars seed={17} recording className="text-rose-ink/50" />
-                  <span className="hidden shrink-0 text-[11px] text-faint sm:inline">{t.chat.recording}</span>
-                </div>
-              ) : voice.phase === "review" ? (
-                <div className="flex min-h-10 flex-1 items-center gap-2 px-1">
-                  <span className="grid size-9 shrink-0 place-items-center rounded-full bg-accent-soft text-accent-ink">
-                    <Mic className="size-4" />
-                  </span>
-                  <div className="min-w-0 flex-1 leading-tight">
-                    <p className="truncate text-xs font-bold text-ink">{t.chat.voiceReady}</p>
-                    <p className="text-[11px] text-muted tabular-nums" dir="ltr">
-                      {formatSecs(voice.duration)}
-                    </p>
-                  </div>
-                  <VoiceBars seed={29} progress={100} className="hidden w-28 text-accent-ink sm:flex" />
-                </div>
+              {voice.phase === "recording" || pillClosing ? (
+                /* v2.4.1 — Animorio recording pill: overlays the composer, holds
+                   discard/timer/live waveform; the mic button morphs to stop. */
+                <RecordingPill
+                  open
+                  closing={pillClosing}
+                  elapsed={pillClosing ? pillElapsed : voice.elapsed}
+                  getLevel={voice.getLevel}
+                  onDiscard={discardRecording}
+                  onClosed={pillClosed}
+                  reduced={reducedMotionPillRef.current}
+                />
               ) : (
                 <textarea
                   ref={inputRef}
@@ -1525,44 +1544,19 @@ export function ChatView({
                   className="max-h-42 min-h-10 flex-1 resize-none bg-transparent py-2 text-[0.95rem] leading-6 text-ink outline-none placeholder:text-faint"
                 />
               )}
-              {voice.phase !== "idle" ? (
-                <>
-                  {/* stop (keeps the clip for review) — trash while reviewing */}
-                  {voice.phase === "review" ? (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        voice.discard();
-                        void voice.start();
-                      }}
-                      disabled={sending}
-                      className="btn btn-ghost btn-icon size-10 shrink-0 rounded-xl"
-                      aria-label={t.chat.reRecord}
-                      title={t.chat.reRecord}
-                    >
-                      <RotateCcw className="size-[18px]" />
-                    </button>
-                  ) : null}
-                  <button
-                    type="button"
-                    onClick={() => (voice.phase === "recording" ? voice.stop() : voice.discard())}
-                    className="btn btn-ghost btn-icon size-10 shrink-0 rounded-xl text-muted hover:text-rose-ink"
-                    aria-label={voice.phase === "recording" ? t.chat.stopRec : t.common.cancel}
-                    title={voice.phase === "recording" ? t.chat.stopRec : t.common.cancel}
-                  >
-                    {voice.phase === "recording" ? <Square className="size-4" /> : <Trash2 className="size-[18px]" />}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={sendVoice}
-                    disabled={sending}
-                    className="btn btn-primary btn-icon size-10 shrink-0 rounded-xl"
-                    aria-label={t.chat.send}
-                    title={t.chat.send}
-                  >
-                    {sending ? <span className="spinner" aria-hidden="true" /> : <SendHorizontal className="size-[18px] rtl:-scale-x-100" />}
-                  </button>
-                </>
+              {voice.phase === "recording" || pillClosing ? (
+                /* The same mic button becomes STOP (icon morph + spring); the
+                   pill collapses on stop/discard and the clip rides send(). */
+                <MicStopButton
+                  recording={voice.phase === "recording"}
+                  onStop={stopAndSend}
+                  onStart={() => void voice.start()}
+                  disabled={sending}
+                  micLabel={t.chat.micRecord}
+                  stopLabel={t.chat.stopRec}
+                  className="relative z-20"
+                  getLevel={voice.getLevel}
+                />
               ) : (draft.trim() || pendingFile) ? (
                 <button
                   type="submit"
@@ -1574,16 +1568,14 @@ export function ChatView({
                   {sending ? <span className="spinner" aria-hidden="true" /> : <SendHorizontal className="size-[18px] rtl:-scale-x-100" />}
                 </button>
               ) : (
-                <button
-                  type="button"
-                  onClick={() => void voice.start()}
+                <MicStopButton
+                  recording={false}
+                  onStart={() => void voice.start()}
+                  onStop={() => undefined}
                   disabled={composerLocked || sending}
-                  className="btn btn-primary btn-icon size-10 shrink-0 rounded-xl"
-                  aria-label={t.chat.micRecord}
-                  title={t.chat.micRecord}
-                >
-                  <Mic className="size-[18px]" />
-                </button>
+                  micLabel={t.chat.micRecord}
+                  stopLabel={t.chat.stopRec}
+                />
               )}
             </form>
           )}

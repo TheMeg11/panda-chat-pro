@@ -1,15 +1,24 @@
 "use client";
 
 /**
- * v2.3.0 — Telegram-style voice messages.
+ * v2.3.0/v2.4.1 — Telegram-style voice messages.
  *
  * `useVoiceRecorder` drives the composer's record flow: tap the mic → the
- * composer swaps to a recording bar (pulsing dot + timer + live bars) with
- * stop/send/trash buttons → stop keeps a preview → send hands the recorded
- * File to the normal send path (it rides the existing attachment upload,
- * including E2EE). `VoicePlayer` renders voice attachments as a Telegram-like
- * chip (play/pause, deterministic waveform, seekable progress, duration) with
- * the classic `duration === Infinity` MediaRecorder-WebM workaround.
+ * Animorio-style recording pill opens (v2.4.1: `RecordingPill`) → tapping the
+ * mic again stops and the clip rides the normal send path (existing upload,
+ * including E2EE).
+ *
+ * v2.4.1 engine hardening (fixes "voice always errors" on restrictive
+ * browsers):
+ * - WAV FALLBACK: browsers without MediaRecorder (old iOS Safari, in-app
+ *   webviews) now record via Web Audio PCM capture → 16-bit mono WAV, so a
+ *   granted microphone always produces a sendable clip.
+ * - ANALYSER: a shared AnalyserNode exposes the live mic level (`getLevel`)
+ *   for the audio-reactive waveform and glow — real amplitude, never random.
+ * - Errors keep their honest denied/busy/unsupported mapping and now carry
+ *   the raw DOMException name for diagnostics.
+ * `VoicePlayer` renders voice attachments as a Telegram-like chip with the
+ * classic `duration === Infinity` MediaRecorder-WebM workaround.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -17,6 +26,7 @@ import { Pause, Play } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export type VoicePhase = "idle" | "recording" | "review";
+export type VoiceEngine = "mediarecorder" | "wav";
 
 const MIMES = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg;codecs=opus"];
 
@@ -37,12 +47,47 @@ function classifyMicError(err: unknown, precheckFailed: boolean): MicError {
   return precheckFailed || name ? "unsupported" : "unsupported";
 }
 
+/** 16-bit mono PCM WAV encoder for the no-MediaRecorder fallback. */
+function encodeWav(chunks: Float32Array[], sampleRate: number): Blob {
+  let n = 0;
+  for (const c of chunks) n += c.length;
+  const buf = new ArrayBuffer(44 + n * 2);
+  const dv = new DataView(buf);
+  const str = (o: number, s: string) => {
+    for (let i = 0; i < s.length; i++) dv.setUint8(o + i, s.charCodeAt(i));
+  };
+  str(0, "RIFF");
+  dv.setUint32(4, 36 + n * 2, true);
+  str(8, "WAVE");
+  str(12, "fmt ");
+  dv.setUint32(16, 16, true);
+  dv.setUint16(20, 1, true); // PCM
+  dv.setUint16(22, 1, true); // mono
+  dv.setUint32(24, sampleRate, true);
+  dv.setUint32(28, sampleRate * 2, true);
+  dv.setUint16(32, 2, true);
+  dv.setUint16(34, 16, true);
+  str(36, "data");
+  dv.setUint32(40, n * 2, true);
+  let off = 44;
+  for (const c of chunks) {
+    for (let i = 0; i < c.length; i++, off += 2) {
+      const v = Math.max(-1, Math.min(1, c[i]));
+      dv.setInt16(off, v < 0 ? v * 0x8000 : v * 0x7fff, true);
+    }
+  }
+  return new Blob([buf], { type: "audio/wav" });
+}
+
 export function useVoiceRecorder() {
   const [phase, setPhase] = useState<VoicePhase>("idle");
   const [elapsed, setElapsed] = useState(0);
   const [duration, setDuration] = useState(0);
   const [url, setUrl] = useState<string | null>(null);
   const [micError, setMicError] = useState<MicError | null>(null);
+  const [micDetail, setMicDetail] = useState<string>("");
+  const [engine, setEngine] = useState<VoiceEngine | null>(null);
+
   const recRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const chunksRef = useRef<Blob[]>([]);
@@ -50,9 +95,35 @@ export function useVoiceRecorder() {
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const blobRef = useRef<Blob | null>(null);
 
+  // Shared Web Audio graph: analyser feeds the waveform/glow; the WAV fallback
+  // taps the same graph when MediaRecorder is unavailable.
+  const ctxRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const levelBufRef = useRef<Uint8Array<ArrayBuffer> | null>(null);
+  const wavRef = useRef<{ chunks: Float32Array[]; rate: number } | null>(null);
+  const wavNodesRef = useRef<{ source: MediaStreamAudioSourceNode; node: ScriptProcessorNode; sink: GainNode } | null>(null);
+  const stoppingRef = useRef(false);
+
   const cleanupStream = useCallback(() => {
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
+    if (wavNodesRef.current) {
+      try {
+        wavNodesRef.current.node.disconnect();
+        wavNodesRef.current.source.disconnect();
+        wavNodesRef.current.sink.disconnect();
+      } catch {
+        /* already torn down */
+      }
+      wavNodesRef.current = null;
+    }
+    if (ctxRef.current) {
+      void ctxRef.current.close().catch(() => undefined);
+      ctxRef.current = null;
+    }
+    analyserRef.current = null;
+    levelBufRef.current = null;
+    wavRef.current = null;
   }, []);
   const clearTimer = useCallback(() => {
     if (timerRef.current) {
@@ -61,11 +132,45 @@ export function useVoiceRecorder() {
     }
   }, []);
 
+  /** Live mic RMS (0..1) — drives the recording waveform and glow. */
+  const getLevel = useCallback((): number => {
+    const an = analyserRef.current;
+    const buf = levelBufRef.current;
+    if (!an || !buf || !streamRef.current) return 0;
+    try {
+      an.getByteTimeDomainData(buf);
+      let sum = 0;
+      for (let i = 0; i < buf.length; i += 2) {
+        const v = (buf[i] - 128) / 128;
+        sum += v * v;
+      }
+      // Perceptual lift: normal speech RMS ~0.05-0.2 → map onto the full bar range.
+      return Math.min(1, Math.sqrt(sum / (buf.length / 2)) * 2.6);
+    } catch {
+      return 0;
+    }
+  }, []);
+
+  const finish = useCallback(
+    (blob: Blob, secs: number) => {
+      blobRef.current = blob;
+      setUrl((old) => {
+        if (old) URL.revokeObjectURL(old);
+        return URL.createObjectURL(blob);
+      });
+      setDuration(Math.max(1, secs));
+      setPhase("review");
+    },
+    [],
+  );
+
   const start = useCallback(async () => {
     setMicError(null);
-    const precheckFailed = !navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined";
+    setMicDetail("");
+    const hasGum = Boolean(navigator.mediaDevices?.getUserMedia);
+    const hasMr = typeof MediaRecorder !== "undefined";
     try {
-      if (precheckFailed) throw new DOMException("recording unsupported", "NotSupportedError");
+      if (!hasGum) throw new DOMException("getUserMedia unavailable", "NotSupportedError");
       let stream: MediaStream;
       try {
         stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
@@ -78,44 +183,74 @@ export function useVoiceRecorder() {
         }
       }
       streamRef.current = stream;
-      const mimeType = MIMES.find((m) => {
-        try {
-          return MediaRecorder.isTypeSupported(m);
-        } catch {
-          return false;
-        }
-      });
-      // Constructor with an exotic mime can throw on some builds — fall back
-      // to the browser default before giving up.
-      let rec: MediaRecorder;
-      try {
-        rec = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
-      } catch {
-        rec = new MediaRecorder(stream);
-      }
-      chunksRef.current = [];
-      rec.ondataavailable = (e) => {
-        if (e.data.size > 0) chunksRef.current.push(e.data);
-      };
-      rec.onstop = () => {
-        clearTimer();
-        cleanupStream();
-        const blob = new Blob(chunksRef.current, { type: rec.mimeType || mimeType || "audio/webm" });
-        blobRef.current = blob;
-        setUrl((old) => {
-          if (old) URL.revokeObjectURL(old);
-          return URL.createObjectURL(blob);
-        });
-        setDuration(Math.max(1, Math.round((Date.now() - startedRef.current) / 1000)));
-        setPhase("review");
-      };
-      try {
-        rec.start(250);
-      } catch {
-        rec.start();
-      }
-      recRef.current = rec;
+
+      // Shared analysis graph (works with either engine).
+      const AudioCtor: typeof AudioContext | undefined = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+      if (!AudioCtor) throw new DOMException("Web Audio unavailable", "NotSupportedError");
+      const ctx = new AudioCtor();
+      ctxRef.current = ctx;
+      const source = ctx.createMediaStreamSource(stream);
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 512;
+      source.connect(analyser);
+      analyserRef.current = analyser;
+      levelBufRef.current = new Uint8Array(new ArrayBuffer(analyser.fftSize));
+      await ctx.resume().catch(() => undefined);
+
       startedRef.current = Date.now();
+      chunksRef.current = [];
+
+      if (hasMr) {
+        setEngine("mediarecorder");
+        const mimeType = MIMES.find((m) => {
+          try {
+            return MediaRecorder.isTypeSupported(m);
+          } catch {
+            return false;
+          }
+        });
+        // Constructor with an exotic mime can throw on some builds — fall back
+        // to the browser default before giving up.
+        let rec: MediaRecorder;
+        try {
+          rec = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+        } catch {
+          rec = new MediaRecorder(stream);
+        }
+        rec.ondataavailable = (e) => {
+          if (e.data.size > 0) chunksRef.current.push(e.data);
+        };
+        rec.onstop = () => {
+          clearTimer();
+          cleanupStream();
+          if (stoppingRef.current) {
+            stoppingRef.current = false;
+            const blob = new Blob(chunksRef.current, { type: rec.mimeType || mimeType || "audio/webm" });
+            finish(blob, Math.max(1, Math.round((Date.now() - startedRef.current) / 1000)));
+          }
+        };
+        try {
+          rec.start(250);
+        } catch {
+          rec.start();
+        }
+        recRef.current = rec;
+      } else {
+        // WAV fallback — MediaRecorder missing (old iOS, hardened webviews).
+        setEngine("wav");
+        const node = ctx.createScriptProcessor(4096, 1, 1);
+        const sink = ctx.createGain();
+        sink.gain.value = 0; // silent tap: ScriptProcessor needs a destination chain
+        source.connect(node);
+        node.connect(sink);
+        sink.connect(ctx.destination);
+        wavRef.current = { chunks: [], rate: ctx.sampleRate };
+        node.onaudioprocess = (e) => {
+          if (wavRef.current) wavRef.current.chunks.push(new Float32Array(e.inputBuffer.getChannelData(0)));
+        };
+        wavNodesRef.current = { source, node, sink };
+      }
+
       setElapsed(0);
       setPhase("recording");
       clearTimer();
@@ -123,17 +258,35 @@ export function useVoiceRecorder() {
     } catch (err) {
       cleanupStream();
       // Honest mapping: granted-but-failing is never reported as "denied".
-      setMicError(classifyMicError(err, precheckFailed));
+      setMicError(classifyMicError(err, !hasGum));
+      setMicDetail((err as DOMException)?.name ?? String(err));
       setPhase("idle");
     }
-  }, [cleanupStream, clearTimer]);
+  }, [cleanupStream, clearTimer, finish]);
 
   const stop = useCallback(() => {
-    if (recRef.current?.state === "recording") recRef.current.stop();
-  }, []);
+    if (recRef.current?.state === "recording") {
+      stoppingRef.current = true; // onstop → finish()
+      try {
+        recRef.current.stop();
+      } catch {
+        stoppingRef.current = false;
+      }
+      return;
+    }
+    // WAV fallback: assemble synchronously from the captured PCM.
+    const wav = wavRef.current;
+    if (wav && wav.chunks.length) {
+      const secs = Math.max(1, Math.round(wav.chunks.reduce((a, c) => a + c.length, 0) / wav.rate));
+      finish(encodeWav(wav.chunks, wav.rate), secs);
+      cleanupStream();
+      clearTimer();
+    }
+  }, [cleanupStream, clearTimer, finish]);
 
   /** Discard the current (or in-flight) recording and return to idle. */
   const discard = useCallback(() => {
+    stoppingRef.current = false;
     if (recRef.current) {
       recRef.current.onstop = null;
       try {
@@ -152,6 +305,7 @@ export function useVoiceRecorder() {
     blobRef.current = null;
     setElapsed(0);
     setDuration(0);
+    setEngine(null);
     setPhase("idle");
   }, [cleanupStream, clearTimer]);
 
@@ -160,13 +314,14 @@ export function useVoiceRecorder() {
     const blob = blobRef.current;
     if (!blob) return null;
     const secs = Math.max(1, Math.round((Date.now() - startedRef.current) / 1000));
-    const ext = blob.type.includes("mp4") ? "m4a" : blob.type.includes("ogg") ? "ogg" : "webm";
+    const ext = blob.type.includes("mp4") ? "m4a" : blob.type.includes("ogg") ? "ogg" : blob.type.includes("wav") ? "wav" : "webm";
     return new File([blob], `voice-${secs}s-${Date.now().toString(36)}.${ext}`, { type: blob.type || "audio/webm" });
   }, []);
 
-  // Unmount (or navigating away): never leave the mic or the timer running.
+  // Unmount (or navigating away): never leave the mic, timer or audio graph running.
   useEffect(
     () => () => {
+      stoppingRef.current = false;
       if (recRef.current) {
         recRef.current.onstop = null;
         try {
@@ -181,7 +336,7 @@ export function useVoiceRecorder() {
     [cleanupStream, clearTimer],
   );
 
-  return { phase, elapsed, duration, url, micError, start, stop, discard, take };
+  return { phase, elapsed, duration, url, micError, micDetail, engine, getLevel, start, stop, discard, take };
 }
 
 /** Deterministic pseudo-waveform (same seed → same bars). */

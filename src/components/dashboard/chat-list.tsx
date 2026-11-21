@@ -343,8 +343,9 @@ export function ChatListPanel({ chats: initialChats, user, roomLimit, totalRooms
         />
       </div>
 
-      {/* Mobile bottom nav (chats / settings / profile) — no hidden entry */}
-      <BottomNav unread={unread} />
+      {/* Mobile bottom nav (chats / settings / profile) — no hidden entry.
+          v2.4.1: the Profile tab renders the account avatar photo. */}
+      <BottomNav unread={unread} user={user ? { id: user.id, displayName: user.displayName, avatarVersion: user.avatarVersion ?? 0 } : undefined} />
     </div>
   );
 }

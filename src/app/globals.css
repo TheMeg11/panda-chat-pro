@@ -808,6 +808,149 @@
   .rec-pulse {
     animation: pc-rec-pulse 1.6s var(--ease-soft) infinite;
   }
+  /* ---- v2.4.1 — Animorio recording pill (adapted for PandaChat Pro) ---- */
+  .pc-composer {
+    position: relative;
+    isolation: isolate;
+  }
+  /* breathing violet glow under the pill (amplitude-driven via JS) */
+  .pc-glow {
+    position: absolute;
+    left: -4%;
+    right: -4%;
+    bottom: -46%;
+    height: 300%;
+    border-radius: 50%;
+    background: radial-gradient(
+      55% 48% at 50% 72%,
+      rgb(142 134 255) 0%,
+      rgba(142, 134, 255, 0.45) 36%,
+      rgba(142, 134, 255, 0) 72%
+    );
+    filter: blur(22px);
+    opacity: 0;
+    transform-origin: 50% 100%;
+    z-index: 0;
+    pointer-events: none;
+  }
+  /* the pill itself: expands out of the microphone via clip-path */
+  .pc-rec {
+    position: absolute;
+    inset-block: 5px;
+    inset-inline-end: 5px;
+    width: calc(100% - 10px);
+    border-radius: 999px;
+    --lv: 0;
+    background:
+      linear-gradient(to top, rgba(142, 134, 255, calc(0.05 + var(--lv) * 0.16)), rgba(142, 134, 255, 0) 70%),
+      #1b1a23;
+    border: 1px solid rgba(142, 134, 255, calc(0.2 + var(--lv) * 0.3));
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding-inline-start: 6px;
+    padding-inline-end: calc(2.5rem + 8px); /* clears the mic button */
+    clip-path: inset(0 0 0 100% round 999px);
+    transition: clip-path 0.42s cubic-bezier(0.55, 0.055, 0.675, 0.19);
+    z-index: 10;
+  }
+  [dir="rtl"] .pc-rec {
+    clip-path: inset(0 100% 0 0 round 999px);
+  }
+  .pc-rec.is-open {
+    clip-path: inset(0 0 0 0% round 999px);
+    transition: clip-path 0.55s cubic-bezier(0.19, 1, 0.22, 1);
+  }
+  [dir="rtl"] .pc-rec.is-open {
+    clip-path: inset(0 0 0 0% round 999px);
+  }
+  .pc-rec-bin {
+    flex: none;
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    border: 0;
+    background: transparent;
+    display: grid;
+    place-items: center;
+    cursor: pointer;
+    color: rgb(141 141 149);
+    transition:
+      background-color 0.2s,
+      color 0.2s,
+      opacity 0.2s,
+      transform 0.2s;
+  }
+  .pc-rec-bin:focus-visible {
+    outline: 2px solid rgb(142 134 255);
+    outline-offset: 2px;
+  }
+  @media (hover: hover) {
+    .pc-rec-bin:hover {
+      background: rgba(255, 107, 107, 0.12);
+      color: rgb(255 107 107);
+    }
+  }
+  .pc-rec-time {
+    flex: none;
+    min-width: 3.1em;
+    font-size: 13.5px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    color: rgb(244 244 245);
+    opacity: 0;
+    transform: translateX(6px);
+    transition:
+      opacity 0.2s,
+      transform 0.2s;
+  }
+  .pc-rec.is-open .pc-rec-time,
+  .pc-rec.is-open .pc-rec-bin {
+    opacity: 1;
+    transform: none;
+    transition-delay: 0.22s;
+  }
+  [dir="rtl"] .pc-rec-time {
+    transform: translateX(-6px);
+  }
+  .pc-rec-wave {
+    flex: 1;
+    min-width: 0;
+    height: 28px;
+    display: block;
+  }
+  /* microphone ↔ stop morph */
+  .pc-mic {
+    position: relative;
+    transform: scale(var(--lv-scale, 1));
+  }
+  .pc-mic-face {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+  }
+  .pc-mic-icon {
+    position: absolute;
+    width: 21px;
+    height: 21px;
+    transition:
+      opacity 0.18s ease,
+      transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+  }
+  .pc-mic-face .pc-mic-icon:last-child {
+    opacity: 0;
+    transform: scale(0.4) rotate(45deg);
+  }
+  .pc-mic-face.is-rec .pc-mic-icon:first-child {
+    opacity: 0;
+    transform: scale(0.6) rotate(-30deg);
+  }
+  .pc-mic-face.is-rec .pc-mic-icon:last-child {
+    opacity: 1;
+    transform: none;
+  }
   /* v2.4.0 — premium message motion: one-shot entrance for fresh rows and the
      hidden real bubble while its ghost flies from the composer. */
   .msg-in > [data-bubble] {
@@ -943,5 +1086,17 @@
   .msg-in > [data-bubble],
   .live-dot::after {
     animation: none;
+  }
+  /* v2.4.1 — recording pill falls back to a plain fade; glow rests at half. */
+  .pc-rec {
+    clip-path: none !important;
+    transition: opacity 0.25s;
+  }
+  [dir="rtl"] .pc-rec {
+    clip-path: none !important;
+  }
+  .pc-glow {
+    opacity: 0.45 !important;
+    transform: none !important;
   }
 }

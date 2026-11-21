@@ -6,6 +6,7 @@ import {
   rooms,
   telegramLinkCodes,
   telegramLinks,
+  userAvatars,
   users,
   type Room,
   type TelegramLink,
@@ -294,6 +295,49 @@ async function storeTgMedia(token: string, roomId: string, memberId: string, med
   return stored.ok ? stored.file.id : null;
 }
 
+/**
+ * v2.4.1 — pull the linked account's Telegram profile photo into user_avatars
+ * so the dashboard sidebar / bottom-nav / profile page show the same picture
+ * as Telegram. Never overrides an avatar the user uploaded themselves, and
+ * retries at most once a day per account.
+ */
+const avatarSyncAt = new Map<string, number>();
+export async function syncTelegramAvatar(botToken: string, account: User, fromId: number) {
+  const last = avatarSyncAt.get(account.id) ?? 0;
+  if (Date.now() - last < 24 * 3600_000) return;
+  avatarSyncAt.set(account.id, Date.now());
+  try {
+    const [existing] = await db
+      .select({ userId: userAvatars.userId })
+      .from(userAvatars)
+      .where(eq(userAvatars.userId, account.id))
+      .limit(1);
+    if (existing) return; // manual upload wins
+    const photos = await tg<{ total_count: number; photos?: Array<{ file_id: string }> }>(
+      botToken,
+      "getUserProfilePhotos",
+      { user_id: fromId, limit: 1 },
+    );
+    const fileId = photos.photos?.[0]?.file_id;
+    if (!photos.total_count || !fileId) return;
+    const file = await tg<{ file_path?: string }>(botToken, "getFile", { file_id: fileId });
+    if (!file.file_path) return;
+    const res = await fetch(`https://api.telegram.org/file/bot${botToken}/${file.file_path}`, {
+      signal: AbortSignal.timeout(15_000),
+      cache: "no-store",
+    });
+    if (!res.ok) return;
+    const buf = Buffer.from(await res.arrayBuffer());
+    if (!buf.length || buf.length > 5 * 1024 * 1024) return;
+    await db
+      .insert(userAvatars)
+      .values({ userId: account.id, mime: "image/jpeg", data: buf, updatedAt: new Date() })
+      .onConflictDoNothing();
+  } catch (error) {
+    console.error("[panda-chat] telegram avatar sync skipped", error);
+  }
+}
+
 export async function handleUpdate(update: TgUpdate) {
   const bot = await import("./platform").then((m) => m.getPlatformBot());
   if (!bot.configured) return;
@@ -471,6 +515,8 @@ export async function handleUpdate(update: TgUpdate) {
   if (!settings.telegramEnabled) return void (await send(chatId, "⛔ The Telegram integration is currently disabled by the administrator."));
   if (settings.telegramPaid && !user.canUseTelegram)
     return void (await send(chatId, "🔒 Bot access is a premium feature — ask the administrator to re-enable it for your account."));
+  // v2.4.1 — best-effort profile-photo sync (fire and forget).
+  if (msg.from?.id) void syncTelegramAvatar(bot.token, user, msg.from.id);
 
   const baseUrl = (settings.publicUrl || process.env.APP_URL || "").replace(/\/+$/, "");
   const inviteUrl = (t: string) => `${baseUrl}/r/${t}`;

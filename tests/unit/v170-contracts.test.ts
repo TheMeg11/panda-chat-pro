@@ -37,9 +37,14 @@ describe("v1.6.0 contracts", () => {
     expect(voice).toContain("getUserMedia");
     expect(voice).toContain("VoicePlayer");
     expect(voice).toContain("Infinity"); // WebM duration probe workaround
+    // v2.4.1: browsers without MediaRecorder record via the WAV fallback.
+    expect(voice).toContain("encodeWav");
+    expect(voice).toContain("createScriptProcessor");
     const view = readFileSync(new URL("../../src/components/chat/chat-view.tsx", import.meta.url), "utf8");
     expect(view).toContain("useVoiceRecorder");
-    expect(view).toContain("sendVoice");
+    // v2.4.1: the Animorio pill flow replaced the old review-bar sendVoice.
+    expect(view).toContain("RecordingPill");
+    expect(view).toContain("stopAndSend");
     expect(view).toContain("t.chat.micRecord");
     // voice rides the regular attachment upload — file bubble routes voice-*.webm
     expect(view).toContain("/^voice-/");

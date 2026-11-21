@@ -41,8 +41,16 @@ export function SidebarHeader() {
   );
 }
 
-/** Mobile bottom tab bar (theme's BottomNav) — no hidden-chats entry. */
-export function BottomNav({ unread = 0 }: { unread?: number }) {
+/** Mobile bottom tab bar (theme's BottomNav) — no hidden-chats entry.
+ * v2.4.1 — the Profile tab shows the account's avatar PHOTO (main-page
+ * visibility on phones; initials fallback when no picture is set). */
+export function BottomNav({
+  unread = 0,
+  user,
+}: {
+  unread?: number;
+  user?: { id: string; displayName: string; avatarVersion: number };
+}) {
   const { t } = useI18n();
   const pathname = usePathname();
   return (
@@ -68,7 +76,15 @@ export function BottomNav({ unread = 0 }: { unread?: number }) {
             )}
           >
             <span className="relative">
-              <Icon className="size-[22px]" aria-hidden="true" />
+              {item.key === "profile" && user ? (
+                <Avatar
+                  name={user.displayName}
+                  size={22}
+                  src={user.avatarVersion > 0 ? `/api/users/${user.id}/avatar?v=${user.avatarVersion}` : undefined}
+                />
+              ) : (
+                <Icon className="size-[22px]" aria-hidden="true" />
+              )}
               {item.key === "chats" && unread > 0 ? (
                 <span className="absolute -end-2 -top-1.5 grid h-4 min-w-4 place-items-center rounded-full bg-rose-ink px-1 text-[10px] font-bold text-white">
                   {unread > 99 ? "99+" : unread}
