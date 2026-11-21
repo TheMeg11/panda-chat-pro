@@ -274,6 +274,31 @@ function stamp(d = new Date()): string {
 
 let running = false;
 
+/** Tehran wall-clock for an instant (hour/minute in Asia/Tehran). */
+export function tehranHourMinute(d = new Date()): { hour: number; minute: number } {
+  const [hourStr, minuteStr] = new Intl.DateTimeFormat("en-GB", {
+    timeZone: TZ,
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  })
+    .format(d)
+    .split(":");
+  return { hour: Number(hourStr), minute: Number(minuteStr) };
+}
+
+/**
+ * Backup-due rule (cost tier C): the daily backup is due once the scheduled
+ * hour has passed — 10 minutes INTO it, so an on-time ticker fire and a later
+ * first-wake catch-up can never double-run. Stays due for the rest of the
+ * day, so missed backups (asleep at the scheduled hour, Telegram down) are
+ * retried on any later wake or active tick.
+ */
+export function isBackupDue(scheduledHour: number, d = new Date()): boolean {
+  const { hour, minute } = tehranHourMinute(d);
+  return hour > scheduledHour || (hour === scheduledHour && minute >= 10);
+}
+
 export async function runBackup(reason: "scheduled" | "manual"): Promise<BackupResult> {
   const token = await superadminBotToken();
   const config = await getBackupConfig();
@@ -387,20 +412,9 @@ export function ensureBackupLoop() {
       const config = await getBackupConfig();
       if (!config.enabled || !(config.chatId || backupChatIds()[0])) return;
       const now = new Date();
-      const [hourStr, minuteStr] = new Intl.DateTimeFormat("en-GB", {
-        timeZone: TZ,
-        hour: "2-digit",
-        minute: "2-digit",
-        hour12: false,
-      })
-        .format(now)
-        .split(":");
-      const hour = Number(hourStr);
-      const minute = Number(minuteStr);
       // Due once the scheduled hour has passed (10 minutes into it, so an
       // on-time ticker fire and a later catch-up can never double-run).
-      const due = hour > config.hour || (hour === config.hour && minute >= 10);
-      if (!due) return;
+      if (!isBackupDue(config.hour, now)) return;
       const state = await readState();
       if (state.lastDate === tehranDateKey(now)) return;
       const result = await runBackup("scheduled");
