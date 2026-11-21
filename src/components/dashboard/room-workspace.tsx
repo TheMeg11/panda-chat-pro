@@ -49,6 +49,8 @@ export type WorkspaceRoom = {
   defaultTtl: number | null;
 };
 export type WorkspaceMember = { id: string; shortId: string; nickname: string; status: string; lastSeenAt: string };
+/** v2.5.0 (B-12): the owner row shown above the guest list in the members tab. */
+export type WorkspaceOwner = { nickname: string } | null;
 export type WorkspaceTelegram = {
   platformEnabled: boolean;
   paid: boolean;
@@ -66,6 +68,7 @@ type Props = {
   isOwner: boolean;
   snapshot: ChatSnapshot;
   members: WorkspaceMember[];
+  owner?: WorkspaceOwner;
   telegram: WorkspaceTelegram;
   maxLength: number;
   commands: Array<{ command: string; description: string }>;
@@ -187,7 +190,7 @@ function Hidden({ roomId, op }: { roomId: string; op: string }) {
 }
 
 /** The tabbed manage modal (theme style). */
-function RoomManagerModal({ open, onClose, room, members, telegram, commands }: Props & { open: boolean; onClose: () => void }) {
+function RoomManagerModal({ open, onClose, room, members, owner, telegram, commands }: Props & { open: boolean; onClose: () => void }) {
   const { t, lang } = useI18n();
   const router = useRouter();
   const now = useNow();
@@ -237,8 +240,10 @@ function RoomManagerModal({ open, onClose, room, members, telegram, commands }: 
           <section className="rounded-2xl border border-line bg-surface-2/50 p-5">
             <PanelTitle icon={Link2} title={t.room.inviteTitle} />
             <p className="mt-2 text-sm leading-relaxed text-muted">{t.room.inviteText}</p>
-            <div className="mt-4 break-all rounded-xl border border-line bg-surface p-3 font-mono text-xs leading-relaxed text-ink-2" dir="ltr">
-              {room.inviteUrl}
+            {/* v2.5.0 (B-19): horizontal-scroll instead of multi-line wrap so the
+                long token can never grow tall enough to cover the close button. */}
+            <div className="mt-4 overflow-x-auto rounded-xl border border-line bg-surface p-3 font-mono text-xs leading-relaxed text-ink-2" dir="ltr">
+              <span className="block whitespace-nowrap">{room.inviteUrl}</span>
             </div>
             <p className="mt-2 flex items-center gap-1.5 text-[11px] font-bold text-mint-ink">
               <ShieldCheck className="size-3.5" />
@@ -403,7 +408,20 @@ function RoomManagerModal({ open, onClose, room, members, telegram, commands }: 
 
         {tab === "members" ? (
           <section className="rounded-2xl border border-line bg-surface-2/50 p-5" data-tutorial="online-status">
-            <PanelTitle icon={Users} tone="mint" title={t.room.membersTitle} aside={<span className="badge badge-neutral">{formatNumber(activeMembers, lang)}</span>} />
+            <PanelTitle icon={Users} tone="mint" title={t.room.membersTitle} aside={<span className="badge badge-neutral">{formatNumber(activeMembers + (owner ? 1 : 0), lang)}</span>} />
+            {owner ? (
+              <ul className="mt-3 divide-y divide-line">
+                <li className="flex items-center gap-3 py-3">
+                  <Avatar name={owner.nickname} size={36} />
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-bold text-ink" dir="auto">
+                      {owner.nickname}
+                    </p>
+                    <p className="text-xs font-semibold text-accent-ink">{t.common.owner}</p>
+                  </div>
+                </li>
+              </ul>
+            ) : null}
             {members.length === 0 ? (
               <p className="mt-4 text-sm leading-relaxed text-muted">{t.room.membersEmpty}</p>
             ) : (

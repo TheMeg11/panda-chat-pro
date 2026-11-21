@@ -231,6 +231,8 @@ export function ChatView({
     instantScrollRef.current = true; // measure the destination on a settled layout
   };
   const [expiredFiles, setExpiredFiles] = useState<Set<string>>(new Set());
+  // v2.5.0 (B-09): full-screen image viewer (lightbox) for file messages.
+  const [zoomedFile, setZoomedFile] = useState<{ id: string; name: string } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   /* ---- Swipe-to-reply (touch): tracks one gesture at a time ---- */
   const swipeRef = useRef<{ x: number; y: number; el: HTMLElement | null; locked: "h" | "v" | null; moved: number }>({
@@ -1057,6 +1059,7 @@ export function ChatView({
                       role="button"
                       tabIndex={0}
                       data-bubble=""
+                      aria-label={`${m.authorName}${mine ? ` · ${t.chat.send}` : ""}: ${m.body || m.file?.name || "GIF"}`}
                       /* Swipe-to-reply: a horizontal drag nudges the bubble sideways and
                          ≥72px of committed movement (either direction — works in RTL and
                          LTR alike) starts a reply. Vertical scrolling stays native
@@ -1205,7 +1208,10 @@ export function ChatView({
                         }
                         return (
                           <>
-                            {m.file ? <FileBubble m={m} expired={expiredFiles.has(m.file.id)} onExpired={() => setExpiredFiles((prev) => new Set(prev).add(m.file!.id))} /> : null}
+                            {m.file ? <FileBubble m={m} expired={expiredFiles.has(m.file.id)} onExpired={() => {
+                    setZoomedFile((z) => (z?.id === m.file!.id ? null : z));
+                    setExpiredFiles((prev) => new Set(prev).add(m.file!.id));
+                  }} onZoom={() => setZoomedFile({ id: m.file!.id, name: m.file!.name })} /> : null}
                             {m.gifId ? (
                               // GIFs never ride along with text or files (the API rejects both
                               // combos) and stream through the same-origin proxy, so CSP
@@ -1235,7 +1241,7 @@ export function ChatView({
                             <Send className="size-3" aria-label={t.chat.viaTelegram} />
                           </span>
                         ) : null}
-                        <time dateTime={m.createdAt}>{hydrated ? formatDate(m.createdAt, lang, { hour: "2-digit", minute: "2-digit" }) : ""}</time>
+                        <time dateTime={m.createdAt}>{hydrated ? formatDate(m.createdAt, lang, { hour: "2-digit", minute: "2-digit", hour12: lang !== "fa" }) : ""}</time>
                       </span>
                     </div>
                     <div
@@ -1438,7 +1444,9 @@ export function ChatView({
                           aria-label={t.selfdestruct.title}
                         >
                           <option value="default">{room.defaultTtl ? (room.defaultTtl === 3600 ? t.selfdestruct.oneHour : room.defaultTtl === 86400 ? t.selfdestruct.oneDay : t.selfdestruct.oneWeek) : t.selfdestruct.off}</option>
-                          <option value="off">{t.selfdestruct.off}</option>
+                          {/* v2.5.0 (B-17): "Off" is a real choice only when the
+                              room has a default — else it duplicates option 1. */}
+                          {room.defaultTtl ? <option value="off">{t.selfdestruct.off}</option> : null}
                           <option value="3600">{t.selfdestruct.oneHour}</option>
                           <option value="86400">{t.selfdestruct.oneDay}</option>
                           <option value="604800">{t.selfdestruct.oneWeek}</option>
@@ -1504,7 +1512,8 @@ export function ChatView({
                 data-tutorial="composer"
               >
                 <option value="default">{room.defaultTtl ? (room.defaultTtl === 3600 ? t.selfdestruct.oneHour : room.defaultTtl === 86400 ? t.selfdestruct.oneDay : t.selfdestruct.oneWeek) : t.selfdestruct.off}</option>
-                <option value="off">{t.selfdestruct.off}</option>
+                {/* v2.5.0 (B-17): same — no duplicate "Off" without a room default. */}
+                {room.defaultTtl ? <option value="off">{t.selfdestruct.off}</option> : null}
                 <option value="3600">{t.selfdestruct.oneHour}</option>
                 <option value="86400">{t.selfdestruct.oneDay}</option>
                 <option value="604800">{t.selfdestruct.oneWeek}</option>
@@ -1572,14 +1581,31 @@ export function ChatView({
                   {sending ? <span className="spinner" aria-hidden="true" /> : <SendIcon className="size-[19px] rtl:-scale-x-100" />}
                 </button>
               ) : (
-                <MicStopButton
-                  recording={false}
-                  onStart={() => void voice.start()}
-                  onStop={() => undefined}
-                  disabled={composerLocked || sending}
-                  micLabel={t.chat.micRecord}
-                  stopLabel={t.chat.stopRec}
-                />
+                <>
+                  {/* v2.5.0 (B-25): BOTH buttons stay mounted when the input is
+                     empty — the mic starts a voice message (it used to be the
+                     only button, so testers read the swap as "send vanished")
+                     and the send button sits disabled with an explaining
+                     tooltip instead of unmounting from the DOM. */}
+                  <MicStopButton
+                    recording={false}
+                    onStart={() => void voice.start()}
+                    onStop={() => undefined}
+                    disabled={composerLocked || sending}
+                    micLabel={t.chat.micRecord}
+                    stopLabel={t.chat.stopRec}
+                  />
+                  <button
+                    type="submit"
+                    disabled
+                    aria-disabled="true"
+                    className="btn btn-primary btn-icon size-10 shrink-0 rounded-xl opacity-45"
+                    aria-label={t.chat.send}
+                    title={t.chat.sendEmptyTitle}
+                  >
+                    <SendIcon className="size-[19px] rtl:-scale-x-100" />
+                  </button>
+                </>
               )}
             </form>
           )}
@@ -1651,6 +1677,34 @@ export function ChatView({
               {t.chat.lostAction}
             </button>
           </div>
+        </div>
+      ) : null}
+
+      {/* v2.5.0 (B-09): in-app image lightbox — Esc, backdrop click or X close. */}
+      {zoomedFile ? (
+        <div
+          className="fixed inset-0 z-50 grid place-items-center bg-[#0b0d24]/85 p-6 backdrop-blur-sm"
+          role="dialog"
+          aria-modal="true"
+          aria-label={zoomedFile.name}
+          onClick={() => setZoomedFile(null)}
+          onKeyDown={(e) => e.key === "Escape" && setZoomedFile(null)}
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={`/api/files/${zoomedFile.id}`}
+            alt={zoomedFile.name}
+            className="max-h-[86dvh] max-w-full rounded-2xl object-contain shadow-float"
+            onClick={(e) => e.stopPropagation()}
+          />
+          <button
+            type="button"
+            className="absolute end-4 top-4 grid size-10 place-items-center rounded-full bg-white/10 text-white transition hover:bg-white/20"
+            aria-label={t.common.close}
+            onClick={() => setZoomedFile(null)}
+          >
+            <X className="size-5" />
+          </button>
         </div>
       ) : null}
     </div>
@@ -1740,23 +1794,38 @@ function WatermarkOverlay({ username }: { username: string }) {
 }
 
 /** Inline media (sniffed-safe image/video/audio) or a download chip for anything else. */
-function FileBubble({ m, expired, onExpired }: { m: ChatMessage; expired: boolean; onExpired: () => void }) {
+function FileBubble({ m, expired, onExpired, onZoom }: { m: ChatMessage; expired: boolean; onExpired: () => void; onZoom?: () => void }) {
   const { t } = useI18n();
   const file = m.file!;
   const url = `/api/files/${file.id}`;
 
   if (expired) {
     return (
-      <span className="mb-1 flex items-center gap-2 rounded-xl border border-line bg-surface-3/70 px-3 py-2.5 text-xs font-semibold text-muted">
+      /* v2.5.0 (B-10): keep the file's name and size so the placeholder is
+         identifiable, and state WHY it no longer opens. */
+      <span
+        className="mb-1 flex max-w-[min(320px,80vw)] items-center gap-2 rounded-xl border border-line bg-surface-3/70 px-3 py-2.5 text-xs font-semibold text-muted"
+        title={t.chat.fileExpiredTitle}
+      >
         <FileWarning className="size-4 shrink-0" />
-        {t.chat.fileExpired}
+        <span className="min-w-0 flex-1 leading-snug">
+          <span className="block truncate font-bold text-ink-2" dir="auto">
+            {file.name}
+          </span>
+          <span className="text-[11px] font-normal">
+            {formatSize(file.size)} · {t.chat.fileExpired}
+          </span>
+        </span>
       </span>
     );
   }
 
   if (file.mime.startsWith("image/")) {
     return (
-      <a href={url} target="_blank" rel="noopener noreferrer nofollow" className="mb-1 block overflow-hidden rounded-xl" onClick={(e) => e.stopPropagation()}>
+      /* v2.5.0 (B-09): in-app lightbox — click zooms the image inside the app
+         (full-screen overlay, Esc/click to close) instead of navigating to the
+         raw /api/files/<uuid> URL and losing the chat. */
+      <button type="button" className="mb-1 block overflow-hidden rounded-xl" onClick={(e) => { e.stopPropagation(); onZoom?.(); }}>
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src={url}
@@ -1765,7 +1834,7 @@ function FileBubble({ m, expired, onExpired }: { m: ChatMessage; expired: boolea
           onError={onExpired}
           className="max-h-72 w-auto max-w-full cursor-zoom-in rounded-xl border border-line object-contain"
         />
-      </a>
+      </button>
     );
   }
 

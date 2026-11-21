@@ -245,7 +245,7 @@
   --color-rose-ink: var(--rose-ink);
   --color-amber-soft: var(--amber-soft);
   --color-amber-ink: var(--amber-ink);
-  --font-sans: "Plus Jakarta Sans", "Vazirmatn", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-sans: "Plus Jakarta Sans", "Vazir Persian", "Vazirmatn", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   --shadow-soft: var(--pc-shadow-1);
   --shadow-card: var(--pc-shadow-2);
   --shadow-float: var(--pc-shadow-3);
@@ -267,7 +267,19 @@
     -moz-osx-font-smoothing: grayscale;
   }
   html[lang="fa"] body {
-    font-family: "Vazirmatn", "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
+    font-family: "Vazirmatn", "Vazir Persian", "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
+  }
+  /* v2.5.0 (B-05): Persian text must always shape with Vazirmatn — even inside
+     an English UI (chat bubbles in a lang=en page). When "Plus Jakarta Sans"
+     wins the run first, the zero-width non-joiner (U+200C) can be dropped by
+     the font fallback chain and Persian words visually fuse ("می‌کنم" →
+     "میکنم"). A dedicated unicode-range face takes over for Arabic-script
+     codepoints only, so Latin UI text keeps its original font. */
+  @font-face {
+    font-family: "Vazir Persian";
+    src: local("Vazirmatn");
+    unicode-range: U+0600-06FF, U+200C-200F, U+FB50-FDFF, U+FE70-FEFF, U+0750-077F;
+    font-weight: 100 900;
   }
   h1,
   h2,

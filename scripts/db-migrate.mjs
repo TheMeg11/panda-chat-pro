@@ -36,6 +36,9 @@ export const MIGRATIONS = [
    )`,
   `create index if not exists hidden_rooms_room_idx on hidden_rooms (room_id)`,
   `alter table users add column if not exists hidden_pin_hash text`,
+  // v2.5.0 (B-01/B-02): decoy PIN + panic mode for the hidden-chats vault
+  `alter table users add column if not exists decoy_pin_hash text`,
+  `alter table users add column if not exists panic_mode boolean not null default false`,
 
   `alter table rooms add column if not exists e2ee_enabled boolean not null default false`,
   `alter table rooms add column if not exists default_ttl integer`,

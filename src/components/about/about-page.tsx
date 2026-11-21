@@ -51,7 +51,11 @@ export function AboutPage() {
           <Toc />
         </aside>
 
-        <main className="min-w-0">
+        {/* v2.5.0 (B-16): the section bodies are authored in Persian; give the
+            content column the Persian direction + font when the UI is fa so
+            headings, lists and FAQ boxes flow RTL instead of sitting LTR with
+            Persian words. */}
+        <main className="min-w-0" dir={isFa ? "rtl" : "ltr"} lang={isFa ? "fa" : "en"}>
           <GettingStarted />
           <Rooms />
           <Messaging />

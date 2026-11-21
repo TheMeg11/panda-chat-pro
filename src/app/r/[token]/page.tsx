@@ -14,7 +14,7 @@ import { LangToggle, ThemeToggle } from "@/components/ui";
 import { getCurrentUser } from "@/lib/auth";
 import { buildSnapshot } from "@/lib/chat";
 import { getI18n } from "@/lib/i18n-server";
-import { getRoomByToken, resolveGuestAccess } from "@/lib/rooms";
+import { getRoomByToken, getAccessibleRoom, readDeviceHash, resolveGuestAccess } from "@/lib/rooms";
 import { getSettings } from "@/lib/settings";
 
 export const dynamic = "force-dynamic";
@@ -99,7 +99,18 @@ export default async function InvitePage({ params }: { params: Promise<{ token: 
   }
 
   const user = await getCurrentUser();
-  if (user && user.id === room.ownerId) redirect(`/dashboard/rooms/${room.id}`);
+  if (user) {
+    // v2.5.0 (B-03): a LOGGED-IN user who opens an invite link must never be
+    // funneled into the guest flow — that used to mint a duplicate guest
+    // member under a fresh device cookie and could clobber the auth session.
+    // The owner goes straight to the dashboard room; an already-joined member
+    // too. Everyone else lands on the join form, which now links the new
+    // membership to their account instead of creating a logged-out duplicate.
+    if (user.id === room.ownerId) redirect(`/dashboard/rooms/${room.id}`);
+    const deviceHash = await readDeviceHash();
+    const joined = await getAccessibleRoom(user.id, room.id, deviceHash);
+    if (joined) redirect(`/dashboard/rooms/${room.id}`);
+  }
 
   const access = await resolveGuestAccess(room);
   if (access.state === "banned") {

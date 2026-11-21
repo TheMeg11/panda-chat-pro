@@ -11,8 +11,15 @@
  */
 
 import { useEffect, useState } from "react";
-import { EyeOff, FolderLock, Sparkles, Waves } from "lucide-react";
-import { changeVaultPinAction, setVaultPinAction, vaultStatusAction } from "@/app/actions/vault";
+import { EyeOff, FolderLock, ShieldAlert, Sparkles, Waves } from "lucide-react";
+import {
+  changeVaultPinAction,
+  panicWipeAction,
+  setDecoyPinAction,
+  setPanicModeAction,
+  setVaultPinAction,
+  vaultStatusAction,
+} from "@/app/actions/vault";
 import { ReplayTutorialButton } from "@/components/tutorial/tutorial-gate";
 import { useI18n } from "@/components/i18n-provider";
 import { setLocalFlag, useLocalFlag } from "@/lib/local-store";
@@ -32,12 +39,19 @@ export function SecurityCard() {
   const [hasPin, setHasPin] = useState<boolean | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
+  // v2.5.0 (B-01/B-02): decoy PIN + panic mode management
+  const [decoyOpen, setDecoyOpen] = useState(false);
+  const [panicOn, setPanicOn] = useState(false);
+  const [panicBusy, setPanicBusy] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       const status = await vaultStatusAction();
-      if (!cancelled) setHasPin(status.hasPin);
+      if (!cancelled) {
+        setHasPin(status.hasPin);
+        setPanicOn(Boolean(status.panicMode));
+      }
     })();
     return () => {
       cancelled = true;
@@ -47,8 +61,9 @@ export function SecurityCard() {
   const toggleWatermark = () => setLocalFlag("pc-watermark", !watermark);
 
   const errText = (code: string) => {
+    if (code === "pinMatchesReal") return t.security.pinMatchesReal;
     const key = PIN_ERROR_KEYS[code as keyof typeof PIN_ERROR_KEYS];
-    return key ? String(t.privacy[key]) : code;
+    return key ? String(t.privacy[key as keyof typeof t.privacy]) : code;
   };
 
   const onSaved = () => {
@@ -78,6 +93,7 @@ export function SecurityCard() {
           {hasPin === null ? null : hasPin ? (
             <form
               className="mt-3 flex flex-wrap items-center gap-2"
+              onChange={() => setError(null)}
               onSubmit={async (e) => {
                 e.preventDefault();
                 setError(null);
@@ -99,6 +115,7 @@ export function SecurityCard() {
           ) : (
             <form
               className="mt-3 flex flex-wrap items-center gap-2"
+              onChange={() => setError(null)}
               onSubmit={async (e) => {
                 e.preventDefault();
                 setError(null);
@@ -119,6 +136,118 @@ export function SecurityCard() {
           )}
           {error ? <p className="notice notice-rose mt-2">{error}</p> : null}
         </div>
+
+        {/* v2.5.0 (B-01/B-02): decoy PIN + panic mode — the FAQ and the tour
+            promise both; this is the management surface. Real PIN required. */}
+        {hasPin ? (
+          <div className="rounded-2xl border border-line bg-surface-2/50 p-4">
+            <p className="flex items-center gap-1.5 text-sm font-bold text-ink">
+              <ShieldAlert className="size-4 text-accent-ink" />
+              {t.security.decoyPin}
+            </p>
+            <p className="mt-0.5 text-xs leading-relaxed text-muted">{t.security.decoyPinHint}</p>
+
+            {!decoyOpen ? (
+              <button type="button" className="btn btn-secondary btn-sm mt-3" onClick={() => setDecoyOpen(true)}>
+                {t.security.setDecoy}
+              </button>
+            ) : (
+              <form
+                className="mt-3 space-y-2"
+                onSubmit={async (e) => {
+                  e.preventDefault();
+                  setError(null);
+                  const fd = new FormData(e.currentTarget);
+                  const res = await setDecoyPinAction({}, fd);
+                  if (res?.ok) {
+                    setDecoyOpen(false);
+                    setSaved(true);
+                    setTimeout(() => setSaved(false), 2000);
+                  } else if (res?.error) setError(errText(res.error));
+                }}
+              >
+                <p className="text-xs text-muted">{t.security.decoyConfirmText}</p>
+                <input className="input h-10 w-full sm:w-44" type="password" name="pin" placeholder={t.privacy.pinCurrent} dir="ltr" autoComplete="current-password" required />
+                <input className="input h-10 w-full sm:w-44" type="password" name="decoyPin" placeholder={t.security.decoyPin} dir="ltr" autoComplete="new-password" required />
+                <div className="flex flex-wrap gap-2">
+                  <SubmitButton className="btn btn-secondary btn-sm h-10">{t.security.setDecoy}</SubmitButton>
+                  <button
+                    type="submit"
+                    name="clear"
+                    value="1"
+                    className="btn btn-soft btn-sm h-10"
+                    formNoValidate
+                    onClick={(e) => {
+                      // clear mode: only the real PIN is needed
+                      const form = e.currentTarget.closest("form");
+                      if (form) form.decoyPin.disabled = true;
+                    }}
+                  >
+                    {t.security.clearDecoy}
+                  </button>
+                </div>
+              </form>
+            )}
+
+            {/* Panic mode toggle */}
+            <div className="mt-4 flex items-start justify-between gap-3 border-t border-line pt-3">
+              <div>
+                <p className="text-sm font-bold text-ink">{t.security.panic}</p>
+                <p className="mt-0.5 text-xs leading-relaxed text-muted">{t.security.panicHint}</p>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={panicOn}
+                disabled={panicBusy}
+                aria-label={t.security.panic}
+                className={`relative block h-[1.45rem] w-10 shrink-0 rounded-full transition ${panicOn ? "bg-gradient-to-r from-rose to-rose-ink" : "bg-line-strong"}`}
+                onClick={async () => {
+                  setPanicBusy(true);
+                  setError(null);
+                  const pin = window.prompt(t.security.panicConfirmText);
+                  if (pin === null) {
+                    setPanicBusy(false);
+                    return;
+                  }
+                  const fd = new FormData();
+                  fd.set("pin", pin);
+                  fd.set("enable", panicOn ? "0" : "1");
+                  const res = await setPanicModeAction({}, fd);
+                  if (res?.ok) {
+                    setPanicOn(!panicOn);
+                    setSaved(true);
+                    setTimeout(() => setSaved(false), 2000);
+                  } else if (res?.error) setError(errText(res.error));
+                  setPanicBusy(false);
+                }}
+              >
+                <span
+                  className={`absolute top-[3px] size-[calc(1.45rem-6px)] rounded-full bg-white shadow transition-all ${panicOn ? "start-[calc(100%-1.45rem+3px)]" : "start-[3px]"}`}
+                />
+              </button>
+            </div>
+
+            {/* Panic wipe NOW */}
+            <form
+              className="mt-3"
+              onSubmit={async (e) => {
+                e.preventDefault();
+                setError(null);
+                const pin = window.prompt(t.security.panicConfirmText);
+                if (pin === null) return;
+                if (!window.confirm(t.security.wipeConfirm)) return;
+                const fd = new FormData();
+                fd.set("pin", pin);
+                const res = await panicWipeAction({}, fd);
+                if (res?.error) setError(errText(res.error));
+              }}
+            >
+              <SubmitButton className="btn btn-soft btn-sm text-rose-ink">{t.security.panicWipe}</SubmitButton>
+            </form>
+            <p className="mt-1 text-[11px] leading-relaxed text-faint">{t.security.panicWipeHint}</p>
+          </div>
+        ) : null}
 
         {/* Watermark */}
         <div className="rounded-2xl border border-line bg-surface-2/50 p-4">

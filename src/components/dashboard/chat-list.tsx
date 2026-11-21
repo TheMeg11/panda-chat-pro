@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import {
   Ban,
   KeyRound,
@@ -51,6 +51,7 @@ const USERNAME_RE = /^[a-zA-Z0-9._]{2,32}$/;
 export function ChatListPanel({ chats: initialChats, user, roomLimit, totalRooms: initialTotal }: Props) {
   const { t } = useI18n();
   const pathname = usePathname();
+  const router = useRouter();
   const [query, setQuery] = useState("");
   const [searched, setSearched] = useState<{ q: string; user: FoundUser | null } | null>(null);
   const [chats, setChats] = useState<DashboardChat[]>(initialChats);
@@ -96,15 +97,24 @@ export function ChatListPanel({ chats: initialChats, user, roomLimit, totalRooms
       }
     };
     void load();
-    const timer = window.setInterval(() => {
-      // hidden tabs sync 4× slower (the notify runtime keeps its own cadence)
-      if (document.hidden && tickRef.current % 4 !== 0) {
-        tickRef.current += 1;
-        return;
-      }
-      tickRef.current += 1;
-      void load();
-    }, 4000);
+    // v2.5.0 (B-15): fixed 4s polling fired ~354 requests per 20 minutes.
+    // Adaptive cadence: 4s while active, doubling up to 60s as the tab sits
+    // idle; any pointer/key activity resets it. Hidden tabs poll 4× slower.
+    let delay = 4000;
+    let stopped = false;
+    let timer = 0;
+    const bumpActivity = () => {
+      delay = 4000;
+    };
+    const tick = () => {
+      if (stopped) return;
+      if (!document.hidden) void load();
+      delay = Math.min(60_000, Math.round(delay * (document.hidden ? 2 : 1.35)));
+      timer = window.setTimeout(tick, delay);
+    };
+    window.addEventListener("pointerdown", bumpActivity, { passive: true });
+    window.addEventListener("keydown", bumpActivity);
+    timer = window.setTimeout(tick, delay);
     const onVisible = () => {
       if (!document.hidden) void load();
     };
@@ -113,9 +123,12 @@ export function ChatListPanel({ chats: initialChats, user, roomLimit, totalRooms
     window.addEventListener("focus", onFocus);
     return () => {
       cancelled = true;
-      window.clearInterval(timer);
+      stopped = true;
+      clearTimeout(timer);
       document.removeEventListener("visibilitychange", onVisible);
       window.removeEventListener("focus", onFocus);
+      window.removeEventListener("pointerdown", bumpActivity);
+      window.removeEventListener("keydown", bumpActivity);
     };
   }, [pathname]);
 
@@ -207,6 +220,13 @@ export function ChatListPanel({ chats: initialChats, user, roomLimit, totalRooms
             type="search"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
+            /* v2.5.0 (B-20): Enter opens the first result — searching is a
+                keyboard flow; forcing a mouse click on the row felt broken. */
+            onKeyDown={(e) => {
+              if (e.key !== "Enter" || filtered.length === 0) return;
+              e.preventDefault();
+              void router.push(`/dashboard/rooms/${filtered[0].id}`);
+            }}
             placeholder={t.dm.searchPlaceholder}
             className="h-10 w-full rounded-full border border-white/10 bg-white/10 ps-10 pe-9 text-sm text-white placeholder:text-white/45 outline-none transition focus:border-white/25 focus:bg-white/15"
             aria-label={t.dm.searchPlaceholder}
@@ -314,6 +334,13 @@ export function ChatListPanel({ chats: initialChats, user, roomLimit, totalRooms
                           dir="auto"
                         >
                           {chat.name}
+                          {/* v2.5.0 (B-32): the @username beside the display name
+                              makes search hits identifiable at a glance. */}
+                          {chat.username && q ? (
+                            <span className="ms-1.5 text-[11px] font-semibold text-faint" dir="ltr">
+                              @{chat.username}
+                            </span>
+                          ) : null}
                         </h3>
                         <LocalTime iso={chat.lastActivityAt} mode="relative" className="shrink-0 whitespace-nowrap text-[11px] text-faint" />
                       </div>

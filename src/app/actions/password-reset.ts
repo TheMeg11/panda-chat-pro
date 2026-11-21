@@ -2,13 +2,14 @@
 
 import { and, desc, eq, isNull } from "drizzle-orm";
 import { db } from "@/db";
-import { passwordResets, sessions, telegramLinks, users } from "@/db/schema";
+import { passwordResets, recoveryCodes as recoveryCodesTable, sessions, telegramLinks, users } from "@/db/schema";
 import { audit } from "@/lib/audit";
 import { hashPassword, randomToken, safeEqual, sha256 } from "@/lib/crypto";
 import { rateLimitDistributed } from "@/lib/rate-limit";
 import { requestMeta } from "@/lib/request";
 import { getSettings } from "@/lib/settings";
 import { getPlatformBot, tg } from "@/lib/telegram/platform";
+import { normalizeRecoveryCode } from "@/lib/totp";
 import type { ActionState } from "@/lib/utils";
 
 /**
@@ -128,7 +129,11 @@ export async function confirmPasswordResetAction(_prev: ActionState, formData: F
   if (!(await rateLimitDistributed(`pwreset-confirm:${meta.ip}`, 20, 60 * 60_000)).ok) return { error: "rateLimited" };
 
   if (!USERNAME_RE.test(username)) return { error: "resetCodeInvalid" };
-  if (!/^\d{6}$/.test(code)) return { error: "resetCodeInvalid" };
+  // v2.5.0 (B-07): a signup recovery code is also accepted here — the only
+  // way back in for users with no linked Telegram. Normalized (dashes/case
+  // stripped) and compared against the sha256 rows like the 2FA flow.
+  const isRecoveryCode = !/^\d{6}$/.test(code);
+  if (!/^\d{6}$/.test(code) && normalizeRecoveryCode(code).length < 8) return { error: "resetCodeInvalid" };
   if (newPassword.length < 8 || newPassword.length > 200) return { error: "passwordShort" };
   if (newPassword !== confirm) return { error: "passwordMismatch" };
 
@@ -136,6 +141,18 @@ export async function confirmPasswordResetAction(_prev: ActionState, formData: F
 
   const [user] = await db.select({ id: users.id }).from(users).where(eq(users.username, username)).limit(1);
   if (!user) return invalid();
+
+  if (isRecoveryCode) {
+    const normalized = normalizeRecoveryCode(code);
+    const [recovery] = await db
+      .update(recoveryCodesTable)
+      .set({ usedAt: new Date() })
+      .where(and(eq(recoveryCodesTable.userId, user.id), eq(recoveryCodesTable.codeHash, sha256(normalized)), isNull(recoveryCodesTable.usedAt)))
+      .returning({ id: recoveryCodesTable.id });
+    if (!recovery) return invalid();
+    await setNewPasswordAndRevoke(user.id, newPassword);
+    return { ok: true, message: "auth.resetDone" };
+  }
 
   const [reset] = await db
     .select()
@@ -163,9 +180,7 @@ export async function confirmPasswordResetAction(_prev: ActionState, formData: F
 
   try {
     await db.update(passwordResets).set({ usedAt: new Date() }).where(eq(passwordResets.id, reset.id));
-    await db.update(users).set({ passwordHash: await hashPassword(newPassword) }).where(eq(users.id, user.id));
-    // Full revocation: a completed reset signs the account out everywhere.
-    await db.delete(sessions).where(eq(sessions.userId, user.id));
+    await setNewPasswordAndRevoke(user.id, newPassword);
   } catch (error) {
     console.error("[panda-chat] password reset confirm failed", error);
     return { error: "generic" };
@@ -173,4 +188,11 @@ export async function confirmPasswordResetAction(_prev: ActionState, formData: F
 
   await audit("auth.password_reset", { actor: username, targetType: "user", targetId: user.id, details: "password reset via telegram" });
   return { ok: true, message: "auth.resetDone" };
+}
+
+/** Shared final step: set the new hash and revoke EVERY session. */
+async function setNewPasswordAndRevoke(userId: string, newPassword: string): Promise<void> {
+  await db.update(users).set({ passwordHash: await hashPassword(newPassword) }).where(eq(users.id, userId));
+  await db.delete(sessions).where(eq(sessions.userId, userId));
+  await audit("auth.password_reset", { targetType: "user", targetId: userId, details: "password reset via signup recovery code" });
 }

@@ -121,6 +121,12 @@ async function normalizeAvatarFile(file: File): Promise<{ file: File; error?: st
       el.onerror = () => reject(new Error("decode failed"));
       el.src = url;
     });
+    // v2.5.0 (B-08): the server rejects images under 512px with a terse error;
+    // check the dimensions up front so the user knows the real reason.
+    if (Math.min(img.naturalWidth, img.naturalHeight) < 512) {
+      URL.revokeObjectURL(url);
+      return { file, error: "avatarMinSize" };
+    }
     const scale = Math.min(1, 1024 / Math.max(img.naturalWidth, img.naturalHeight));
     const canvas = document.createElement("canvas");
     canvas.width = Math.max(1, Math.round(img.naturalWidth * scale));

@@ -43,6 +43,12 @@ export const users = pgTable("users", {
   maxRooms: integer("max_rooms"),
   /** v2.2.0 — scrypt hash of the hidden-chats vault PIN (server-side now) */
   hiddenPinHash: text("hidden_pin_hash"),
+  /** v2.5.0 (B-01) — scrypt hash of the DECOY PIN: entering it in the vault
+   *  dialog shows an innocent empty vault instead of the real hidden list. */
+  decoyPinHash: text("decoy_pin_hash"),
+  /** v2.5.0 (B-02) — panic mode: with this ON, entering the decoy PIN wipes
+   *  every hidden chat on the account and locks the current session. */
+  panicMode: boolean("panic_mode").notNull().default(false),
   createdAt: ts("created_at").notNull().defaultNow(),
   lastLoginAt: ts("last_login_at"),
 });

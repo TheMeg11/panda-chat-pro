@@ -87,7 +87,7 @@ export function ThemeCard() {
   const swatch = (p: (typeof PALETTES)[number]) => (snap.isDark ? p.dark : p.light);
 
   return (
-    <section id="theme" className="card scroll-mt-20 p-5 sm:p-6" aria-labelledby="theme-title">
+    <section id="theme" className="card scroll-mt-28 p-5 sm:p-6" aria-labelledby="theme-title">
       <h2 id="theme-title" className="flex items-center gap-2 font-extrabold text-ink">
         <Palette className="size-4 text-accent-ink" />
         {t.theme.title}

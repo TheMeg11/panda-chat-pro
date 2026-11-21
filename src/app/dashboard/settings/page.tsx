@@ -100,8 +100,11 @@ export default async function AccountPage() {
         <p className="mt-2 text-muted">{t.account.subtitle}</p>
       </div>
 
-      {/* Sticky anchor nav: jumps between the settings sections. */}
-      <nav aria-label={t.common.account} className="sticky top-0 z-20 -mx-1 mb-4 flex flex-wrap gap-1.5 border-b border-line bg-canvas/95 py-2 backdrop-blur">
+      {/* Sticky anchor nav: jumps between the settings sections.
+          v2.5.0 (B-18): switches under it were covered by this bar when an
+          anchor scrolled them flush beneath — sections now clear the bar via
+          scroll-mt-28, and the bar itself stops stacking above page dialogs. */}
+      <nav aria-label={t.common.account} className="sticky top-0 z-10 -mx-1 mb-4 flex flex-wrap gap-1.5 border-b border-line bg-canvas/95 py-2 backdrop-blur">
         {anchors.map((a) => (
           <a
             key={a.href}
@@ -123,7 +126,7 @@ export default async function AccountPage() {
         {/* ---------------------------------------------------------- */}
         {/* Account: profile (avatar + name + bio), tutorial, danger zone */}
         {/* ---------------------------------------------------------- */}
-        <section id="account" className="scroll-mt-20 space-y-5">
+        <section id="account" className="scroll-mt-28 space-y-5">
           <div className="card p-5 sm:p-6">
             <div className="flex items-center gap-4">
               <Avatar
@@ -208,14 +211,14 @@ export default async function AccountPage() {
         {/* ---------------------------------------------------------- */}
         {/* Notifications: device-local browser notification preferences */}
         {/* ---------------------------------------------------------- */}
-        <section id="notifications" className="scroll-mt-20">
+        <section id="notifications" className="scroll-mt-28">
           <NotificationsCard />
         </section>
 
         {/* ---------------------------------------------------------- */}
         {/* Security: password, sessions, 2FA, privacy toolbox           */}
         {/* ---------------------------------------------------------- */}
-        <section id="security" className="scroll-mt-20 space-y-5">
+        <section id="security" className="scroll-mt-28 space-y-5">
           <section className="card p-5 sm:p-6">
             <h2 className="flex items-center gap-2 font-extrabold text-ink">
               <KeyRound className="size-4 text-accent-ink" />

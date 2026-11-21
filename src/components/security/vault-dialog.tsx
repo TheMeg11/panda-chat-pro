@@ -273,6 +273,9 @@ function VaultDialogSession({ open, onOpenChange }: { open: boolean; onOpenChang
       <Modal open={open && stage === "change"} onClose={close} title={t.privacy.changeTitle}>
         <form
           className="space-y-4"
+          /* v2.5.0 (B-30): a stale "PINs don't match" under edited fields reads
+             as a live error; clear it the moment any input changes. */
+          onChange={() => setError(null)}
           onSubmit={async (e) => {
             e.preventDefault();
             setError(null);

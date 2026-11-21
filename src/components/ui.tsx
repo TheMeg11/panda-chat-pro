@@ -100,6 +100,7 @@ export function ActionForm({
   confirm,
   resetOnSuccess = false,
   showMessage = true,
+  onSubmitHook,
 }: {
   action: Action;
   children: ReactNode;
@@ -107,6 +108,10 @@ export function ActionForm({
   confirm?: string;
   resetOnSuccess?: boolean;
   showMessage?: boolean;
+  /** v2.5.0 (B-06): runs before the action is dispatched. Return false to
+   *  block submission (e.g. client-side validation with an inline message) —
+   *  native constraint validation can fail silently in embedded browsers. */
+  onSubmitHook?: (form: HTMLFormElement) => boolean;
 }) {
   const [state, formAction, pending] = useActionState(action, {});
   const formRef = useRef<HTMLFormElement>(null);
@@ -122,6 +127,7 @@ export function ActionForm({
         onSubmit={(event) => {
           event.preventDefault();
           if (confirm && !window.confirm(confirm)) return;
+          if (onSubmitHook && !onSubmitHook(event.currentTarget)) return;
           const data = new FormData(event.currentTarget);
           startTransition(() => formAction(data));
         }}

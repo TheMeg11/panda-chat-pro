@@ -1,7 +1,8 @@
-import type { ReactNode } from "react";
+import { Suspense, type ReactNode } from "react";
 import { Megaphone, Wrench } from "lucide-react";
 import { DashboardShell } from "@/components/dashboard/dashboard-shell";
 import { ChatListPanel } from "@/components/dashboard/chat-list";
+import { WelcomeCodesBanner } from "@/components/dashboard/welcome-codes-banner";
 import { NotifyManager } from "@/components/notify-manager";
 import { TutorialGate } from "@/components/tutorial/tutorial-gate";
 import { requireUser } from "@/lib/auth";
@@ -69,6 +70,10 @@ export default async function DashboardLayout({ children }: { children: ReactNod
         }
         announcement={announcement}
       >
+        {/* useSearchParams needs a Suspense boundary inside a server layout. */}
+        <Suspense fallback={null}>
+          <WelcomeCodesBanner />
+        </Suspense>
         {children}
       </DashboardShell>
       {onboarding ? <TutorialGate state={onboarding} /> : null}

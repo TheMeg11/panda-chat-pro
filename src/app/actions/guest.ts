@@ -41,15 +41,32 @@ export async function unlockRoomAction(_prev: ActionState, formData: FormData): 
     return { error: "wrongPassword" };
   }
   clearRateLimit(key);
+  // v2.5.0 (B-03): a logged-in member must be linked to their ACCOUNT, not
+  // minted as a duplicate guest under a brand-new device cookie. Reuse the
+  // account-linked row first, then this device's row, and only then insert.
   const deviceHash = await ensureDeviceHash();
   const user = await getCurrentUser();
-  await db
-    .insert(roomMembers)
-    .values({ roomId: room.id, deviceHash, userId: user?.id ?? null, role: "guest", passwordVersion: room.passwordVersion })
-    .onConflictDoUpdate({
-      target: [roomMembers.roomId, roomMembers.deviceHash],
-      set: { passwordVersion: room.passwordVersion },
-    });
+  const [byAccount] = user
+    ? await db
+        .select({ id: roomMembers.id })
+        .from(roomMembers)
+        .where(and(eq(roomMembers.roomId, room.id), eq(roomMembers.userId, user.id)))
+        .limit(1)
+    : [];
+  if (byAccount) {
+    await db
+      .update(roomMembers)
+      .set({ passwordVersion: room.passwordVersion })
+      .where(eq(roomMembers.id, byAccount.id));
+  } else {
+    await db
+      .insert(roomMembers)
+      .values({ roomId: room.id, deviceHash, userId: user?.id ?? null, role: "guest", passwordVersion: room.passwordVersion })
+      .onConflictDoUpdate({
+        target: [roomMembers.roomId, roomMembers.deviceHash],
+        set: { passwordVersion: room.passwordVersion, ...(user ? { userId: user.id } : {}) },
+      });
+  }
   revalidatePath(`/r/${token}`);
   return { ok: true };
 }
@@ -74,12 +91,23 @@ export async function joinRoomAction(_prev: ActionState, formData: FormData): Pr
   if (access.state === "password") return { error: "wrongPassword" };
 
   const user = await getCurrentUser();
-  const wasMember = Boolean(access.member?.nickname);
-  if (access.member) {
+  // v2.5.0 (B-03): an account may already have a membership row (joined on
+  // another device / pre-existing). Prefer and update that row instead of
+  // creating a same-name duplicate guest for the current device.
+  const [byAccount] = user
+    ? await db
+        .select({ id: roomMembers.id, nickname: roomMembers.nickname })
+        .from(roomMembers)
+        .where(and(eq(roomMembers.roomId, room.id), eq(roomMembers.userId, user.id)))
+        .limit(1)
+    : [];
+  const target = byAccount ?? access.member;
+  const wasMember = Boolean(target?.nickname);
+  if (target) {
     await db
       .update(roomMembers)
-      .set({ nickname, lastSeenAt: new Date(), passwordVersion: room.passwordVersion })
-      .where(eq(roomMembers.id, access.member.id));
+      .set({ nickname, userId: user?.id ?? null, lastSeenAt: new Date(), passwordVersion: room.passwordVersion })
+      .where(eq(roomMembers.id, target.id));
   } else {
     await db.insert(roomMembers).values({
       roomId: room.id,

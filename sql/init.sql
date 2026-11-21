@@ -306,3 +306,6 @@ CREATE TABLE IF NOT EXISTS hidden_rooms (
 );
 CREATE INDEX IF NOT EXISTS hidden_rooms_room_idx ON hidden_rooms (room_id);
 ALTER TABLE users ADD COLUMN IF NOT EXISTS hidden_pin_hash text;
+-- v2.5.0 (B-01/B-02): decoy PIN + panic mode for the hidden-chats vault
+ALTER TABLE users ADD COLUMN IF NOT EXISTS decoy_pin_hash text;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS panic_mode boolean NOT NULL DEFAULT false;

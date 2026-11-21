@@ -141,7 +141,7 @@ export function TelegramCard({ telegramEnabled, paid, allowed, botUsername, isOw
   const toggleDisabled = !telegramEnabled || (paid && !allowed && !isOwner);
 
   return (
-    <section id="telegram" className="glass card scroll-mt-20 border-white/40 p-5 shadow-glass sm:p-6">
+    <section id="telegram" className="glass card scroll-mt-28 border-white/40 p-5 shadow-glass sm:p-6">
       <div className="flex flex-wrap items-center gap-4">
         <span className="grid size-12 shrink-0 place-items-center rounded-2xl bg-gradient-to-br from-[#2AABEE] to-[#229ED9] text-white shadow-soft">
           <Send className="size-5" />

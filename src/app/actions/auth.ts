@@ -3,7 +3,7 @@
 import { redirect } from "next/navigation";
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
-import { users } from "@/db/schema";
+import { recoveryCodes, users } from "@/db/schema";
 import { createUserSession, destroyCurrentSession } from "@/lib/auth";
 import { verifyCaptcha } from "@/lib/captcha";
 import { hashPassword, verifyDummyPassword, verifyPassword } from "@/lib/crypto";
@@ -12,6 +12,8 @@ import { clearRateLimit, rateLimitDistributed } from "@/lib/rate-limit";
 import { requestMeta } from "@/lib/request";
 import { getSettings } from "@/lib/settings";
 import { is2faEnabled, issuePreAuthToken, verifyLogin2fa, verifyPreAuthToken } from "@/lib/twofactor";
+import { generateRecoveryCodes } from "@/lib/totp";
+import { sha256 } from "@/lib/crypto";
 import type { ActionState } from "@/lib/utils";
 
 const USERNAME_RE = /^[a-z0-9_.]{3,24}$/;
@@ -116,8 +118,17 @@ export async function registerAction(_prev: ActionState, formData: FormData): Pr
   } catch {
     return { error: "usernameTaken" };
   }
+  // v2.5.0 (B-07): password reset used to require a linked Telegram — without
+  // one, a forgotten password meant losing the account forever. Every new
+  // account now gets 10 one-time recovery codes (shown ONCE, then only their
+  // sha256 hashes remain). They unlock the password-reset confirm step.
+  const codes = generateRecoveryCodes(10);
+  await db.insert(recoveryCodes).values(codes.map((c) => ({ userId, codeHash: sha256(c) })));
+
   await createUserSession(userId, remember);
-  redirect("/dashboard");
+  // The codes ride the one-time ?welcome=1 banner on the dashboard — the
+  // redirect is not a return value, so they cannot leak into a response body.
+  redirect(`/dashboard?welcome=1&codes=${encodeURIComponent(codes.join(","))}`);
 }
 
 export async function logoutAction(): Promise<void> {

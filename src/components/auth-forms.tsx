@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useEffect, useState } from "react";
+import { useActionState, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { RefreshCw } from "lucide-react";
 import { login2faAction, loginAction, registerAction } from "@/app/actions/auth";
@@ -362,9 +362,36 @@ export function ForgotPasswordForm() {
 
 export function RegisterForm() {
   const { t } = useI18n();
+  // v2.5.0 (B-06): native minLength validation fails SILENTLY in embedded
+  // browsers and some automation contexts (no bubble, no network request —
+  // the button just does nothing). Validate in JS and show the reason under
+  // the field so a short password is never a dead click.
+  const [pwError, setPwError] = useState<string | null>(null);
+  const pwRef = useRef<HTMLInputElement | null>(null);
+  const confirmRef = useRef<HTMLInputElement | null>(null);
+  const checkPassword = (form: HTMLFormElement): boolean => {
+    const pw = form.querySelector<HTMLInputElement>("input[name=password]");
+    const cf = form.querySelector<HTMLInputElement>("input[name=confirm]");
+    if (pw && pw.value.length > 0 && pw.value.length < 8) {
+      setPwError(t.errors.passwordShort);
+      pw.focus();
+      return false;
+    }
+    if (pw && cf && cf.value.length > 0 && pw.value !== cf.value) {
+      setPwError(t.errors.passwordMismatch);
+      cf.focus();
+      return false;
+    }
+    setPwError(null);
+    return true;
+  };
   return (
     <>
-      <ActionForm action={registerAction} className="space-y-5">
+      <ActionForm
+        action={registerAction}
+        className="space-y-5"
+        onSubmitHook={checkPassword}
+      >
         <div>
           <label className="label" htmlFor="displayName">
             {t.auth.displayName}
@@ -415,6 +442,11 @@ export function RegisterForm() {
           </div>
         </div>
         <p className="hint -mt-2">{t.auth.passwordHint}</p>
+        {pwError ? (
+          <p role="alert" className="notice notice-rose -mt-2">
+            {pwError}
+          </p>
+        ) : null}
         <CaptchaField />
         <RememberMe />
         <SubmitButton className="btn btn-primary btn-lg w-full">{t.auth.submitRegister}</SubmitButton>

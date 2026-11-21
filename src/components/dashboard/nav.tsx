@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { logoutAction } from "@/app/actions/auth";
 import { Avatar, Logo } from "@/components/brand";
+import { useVersionTap, VaultDialog } from "@/components/security/vault-dialog";
 import { useI18n } from "@/components/i18n-provider";
 import { tr } from "@/lib/i18n";
 import { APP_VERSION } from "@/lib/version";
@@ -25,18 +26,30 @@ export const NAV_ITEMS: Array<{ key: NavTab; href: string; icon: LucideIcon; lab
   { key: "profile", href: "/dashboard/profile", icon: UserRound, labelPath: "common.profile" },
 ];
 
-/** Desktop sidebar header (icon rail on md, full width on lg) — deep navy. */
+/** Desktop sidebar header (icon rail on md, full width on lg) — deep navy.
+ *  v2.5.0 (B-14): the version badge is now the SECOND five-tap vault entrance
+ *  (the About-page footer stays the first) — the tutorial references the
+ *  badge, so it must actually open the vault. */
 export function SidebarHeader() {
   const { t } = useI18n();
+  const { onTap, open, setOpen } = useVersionTap();
   return (
     <div className="bg-side px-3 pb-4 pt-[calc(env(safe-area-inset-top)+1rem)] text-white md:px-4 lg:px-5">
       <div className="flex items-center justify-between">
         <Logo href="/dashboard" size={34} onDark />
-        <span className="rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-bold text-white/70" dir="ltr">
+        <button
+          type="button"
+          onClick={onTap}
+          className="rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-bold text-white/70 transition hover:bg-white/15 hover:text-white"
+          dir="ltr"
+          aria-label={`v${APP_VERSION.split(".").slice(0, 2).join(".")}`}
+          title={t.privacy.unlockTitle}
+        >
           v{APP_VERSION.split(".").slice(0, 2).join(".")}
-        </span>
+        </button>
       </div>
       <p className="mt-1 hidden ps-1 text-[11px] font-medium text-white/50 lg:block">{t.common.dashboard}</p>
+      <VaultDialog open={open} onOpenChange={setOpen} />
     </div>
   );
 }

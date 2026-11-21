@@ -28,9 +28,11 @@ export async function GET(_req: Request, ctx: Ctx) {
       .where(eq(userAvatars.userId, id))
       .limit(1);
   } catch {
-    return new Response("Not found", { status: 404 });
+    // v2.5.0 (B-28): cache 404s briefly — users without a picture re-request
+    // the avatar on every poll otherwise (hundreds of wasted round-trips).
+    return new Response("Not found", { status: 404, headers: { "cache-control": "private, max-age=600" } });
   }
-  if (!row) return new Response("Not found", { status: 404 });
+  if (!row) return new Response("Not found", { status: 404, headers: { "cache-control": "private, max-age=600" } });
 
   const bytes = new Uint8Array(row.data);
   return new Response(bytes, {

@@ -140,6 +140,7 @@ export default async function RoomPage({ params }: { params: Promise<{ id: strin
       }}
       isOwner={isOwner}
       snapshot={snapshot}
+      owner={{ nickname: user.displayName }}
       members={members
         .filter((m) => m.role === "guest")
         .map((m) => ({

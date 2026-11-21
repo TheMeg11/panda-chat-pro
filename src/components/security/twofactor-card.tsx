@@ -70,7 +70,7 @@ export function TwoFactorCard({ enabled }: { enabled: boolean }) {
               <img src={qrDataUrl} alt="TOTP QR code" width={220} height={220} className="rounded-xl border border-line bg-white p-2" />
               <p className="text-xs text-muted">{t.twofactor.scanHint}</p>
               <div className="flex items-center gap-2">
-                <code className="rounded-lg bg-surface-3 px-3 py-1.5 font-mono text-xs text-ink" dir="ltr">
+                <code className="rounded-lg bg-surface-3 px-3 py-1.5 font-mono text-xs text-ink" dir="ltr" aria-label={t.twofactor.manualSecret ?? "Secret key"}>
                   {secret}
                 </code>
                 <CopyButton value={secret ?? ""} className="btn btn-soft btn-sm" />
@@ -111,13 +111,15 @@ export function TwoFactorCard({ enabled }: { enabled: boolean }) {
             {t.twofactor.recoveryTitle}
           </p>
           <p className="text-xs leading-relaxed text-muted">{t.twofactor.recoveryText}</p>
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+          {/* v2.5.0 (B-26): aria-live so screen readers announce the freshly
+              generated codes; each code is a list item for linear navigation. */}
+          <ul className="grid grid-cols-2 gap-2 sm:grid-cols-3" aria-live="polite" aria-label={t.twofactor.recoveryTitle}>
             {shownCodes.map((code) => (
-              <code key={code} className="rounded-lg bg-surface px-2 py-1.5 text-center font-mono text-xs text-ink" dir="ltr">
+              <li key={code} className="rounded-lg bg-surface px-2 py-1.5 text-center font-mono text-xs text-ink" dir="ltr">
                 {code}
-              </code>
+              </li>
             ))}
-          </div>
+          </ul>
           <div className="flex gap-2">
             <CopyButton value={shownCodes.join("\n")} className="btn btn-secondary btn-sm" />
             <button type="button" className="btn btn-soft btn-sm" onClick={() => setStage("idle")}>

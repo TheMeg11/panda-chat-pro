@@ -327,16 +327,16 @@ export function PrivateChats() {
         <div className="card p-6 sm:p-7">
           <div className="flex items-center gap-3">
             <IconTile icon={EyeOff} tone="lavender" />
-            <h3 className="text-lg font-extrabold text-ink">چت‌های مخفی روی دستگاه</h3>
+            <h3 className="text-lg font-extrabold text-ink">چت‌های مخفی روی حساب</h3>
           </div>
           <p className="mt-5 text-sm leading-7 text-ink-2">
-            با «مخفی‌کردن گفتگو»، آن گفتگو از فهرست شما <b className="text-ink">فقط روی همین دستگاه</b> برداشته
+            با «مخفی‌کردن گفتگو»، آن گفتگو از فهرست شما <b className="text-ink">در همهٔ دستگاه‌هایتان</b> برداشته
             می‌شود. بار اول یک رمز مخفی (حداقل ۴ کاراکتر) انتخاب می‌کنید و از آن به بعد فهرست «چت‌های مخفی» فقط با
             همین رمز باز می‌شود. از همان فهرست می‌توانید هر گفتگو را با «نمایش مجدد» برگردانید.
           </p>
           <ul className="mt-5 space-y-1.5">
-            <CheckItem>رمز چت‌های مخفی روی همین دستگاه ذخیره می‌شود و به سرور ارسال نمی‌شود.</CheckItem>
-            <CheckItem>روی دستگاه‌های دیگر، همان گفتگو مثل همیشه در فهرست دیده می‌شود.</CheckItem>
+            <CheckItem>رمز گاوصندوق به‌صورت هش‌شده روی حساب شما ذخیره می‌شود و در همهٔ دستگاه‌ها کار می‌کند.</CheckItem>
+            <CheckItem>گفتگوی مخفی‌شده در همهٔ دستگاه‌ها از فهرست خارج می‌شود و فقط با رمز گاوصندوق برمی‌گردد.</CheckItem>
             <CheckItem>
               <a href="#version" style={{ color: "inherit", textDecoration: "none", cursor: "default" }} aria-hidden={false}>
                 راه باز کردن فهرست چت‌های مخفی
