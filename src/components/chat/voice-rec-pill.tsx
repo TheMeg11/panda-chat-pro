@@ -51,16 +51,29 @@ export function RecordingPill({
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const glowRef = useRef<HTMLDivElement | null>(null);
   const closeDoneRef = useRef(false);
-
-  // The close animation completes → tell the parent to finalize (send).
+  // Latest-ref: onClosed has a new identity every parent render — keeping it
+  // out of the effect deps, or the pending close timer gets cancelled each
+  // render and the pill never finalizes (stops→send silently no-ops).
+  const onClosedRef = useRef(onClosed);
   useEffect(() => {
-    if (open && closing && !closeDoneRef.current) {
-      closeDoneRef.current = true;
-      const t = setTimeout(onClosed, reduced ? 260 : 700);
-      return () => clearTimeout(t);
+    onClosedRef.current = onClosed;
+  });
+
+  // Close: drop the reveal class (clip-path collapses via CSS) and finalize.
+  useEffect(() => {
+    if (!open) {
+      closeDoneRef.current = false;
+      return;
     }
-    if (!open) closeDoneRef.current = false;
-  }, [open, closing, onClosed, reduced]);
+    if (closing) {
+      pillRef.current?.classList.remove("is-open");
+      if (!closeDoneRef.current) {
+        closeDoneRef.current = true;
+        const t = setTimeout(() => onClosedRef.current(), reduced ? 260 : 700);
+        return () => clearTimeout(t);
+      }
+    }
+  }, [open, closing, reduced]);
 
   // Open/close reveal (clip-path + content fade) — CSS transitions driven by
   // the is-open class; direction-aware via the form's dir (globals.css).
