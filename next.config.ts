@@ -54,6 +54,17 @@ const securityHeaders = [
 
 const nextConfig: NextConfig = {
   poweredByHeader: false,
+  // Cost tier B (2026-11-21): standalone server output — the runtime loads a
+  // minimal server bundle instead of the full next CLI, cutting ~40-60MB RSS.
+  // Railway runs "node .next/standalone/server.js" (see railway.json); local
+  // `npm start` keeps working via next start (warning only).
+  output: "standalone",
+  // Standalone runs from .next/standalone — files read at runtime that are
+  // not traced automatically (sql/init.sql for the boot self-heal, and the
+  // migration CLI) must be copied into the bundle explicitly.
+  outputFileTracingIncludes: {
+    "/**": ["./sql/init.sql", "./scripts/db-migrate.mjs"],
+  },
   // Avatar uploads go through a server action — the default 1 MB action body
   // limit is too small for the 4 MB avatars the backend accepts.
   experimental: {

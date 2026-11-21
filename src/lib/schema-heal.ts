@@ -1,4 +1,5 @@
 import { readFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { sql } from "drizzle-orm";
@@ -24,6 +25,24 @@ import { db } from "@/db";
 
 const BASELINE_TABLES = ["users", "rooms", "messages", "platform_settings"] as const;
 
+/**
+ * Loads scripts/db-migrate.mjs across build layouts: the bundler-resolved
+ * import works under next start/dev; the absolute cwd fallback covers the
+ * standalone server, where the traced copy sits at <repo>/scripts (cwd) or
+ * .next/standalone/scripts.
+ */
+async function importMigrations(): Promise<{ applyMigrations: (run: (s: string) => Promise<unknown>) => Promise<unknown> }> {
+  try {
+    return await import("../../scripts/db-migrate.mjs");
+  } catch {
+    for (const base of [join(process.cwd(), "scripts"), join(process.cwd(), ".next", "standalone", "scripts")]) {
+      const p = join(base, "db-migrate.mjs");
+      if (existsSync(p)) return (await import(/* webpackIgnore: true */ p)) as { applyMigrations: (run: (s: string) => Promise<unknown>) => Promise<unknown> };
+    }
+    throw new Error("scripts/db-migrate.mjs not found");
+  }
+}
+
 export async function ensureSchema(): Promise<"ok" | "applied" | "failed"> {
   const g = globalThis as typeof globalThis & { __pcSchemaHealed?: boolean };
   if (g.__pcSchemaHealed) return "ok";
@@ -39,13 +58,26 @@ export async function ensureSchema(): Promise<"ok" | "applied" | "failed"> {
   }
 
   try {
+    // sql/init.sql resolves differently across run layouts (cost tier B,
+    // 2026-11-21 — standalone output):
+    //  1. src/lib-relative — `next start`, dev server, and traced standalone
+    //     bundles where nft placed the file at the mirrored relative path;
+    //  2. cwd-relative — Railway standalone (start command runs from the repo
+    //     root, where sql/init.sql is present in the build context);
+    //  3. the traced copy inside .next/standalone (outputFileTracingIncludes).
     const here = dirname(fileURLToPath(import.meta.url));
-    const initSql = await readFile(join(here, "..", "..", "sql", "init.sql"), "utf8");
+    const initSqlPath = [
+      join(here, "..", "..", "sql", "init.sql"),
+      join(process.cwd(), "sql", "init.sql"),
+      join(process.cwd(), ".next", "standalone", "sql", "init.sql"),
+    ].find((p) => existsSync(p));
+    if (!initSqlPath) throw new Error("sql/init.sql not found (dev/next-start/standalone layouts all checked)");
+    const initSql = await readFile(initSqlPath, "utf8");
     await db.execute(sql.raw(initSql));
     // Reuse the incremental migration statements (newer columns/tables not
     // yet part of init.sql) — they are all IF NOT EXISTS, so a fresh schema
     // and an old one both converge to the current shape.
-    const { applyMigrations } = await import("../../scripts/db-migrate.mjs");
+    const { applyMigrations } = await importMigrations();
     await applyMigrations((statement: string) => db.execute(sql.raw(statement)));
     const res = await db.execute(
       sql`select count(*)::int as n from information_schema.tables where table_schema = 'public'`,
