@@ -28,7 +28,6 @@ import {
   Unlock,
   Reply,
   Send,
-  SendHorizontal,
   ShieldAlert,
   Trash2,
   Video,
@@ -1547,7 +1546,11 @@ export function ChatView({
               )}
               {voice.phase === "recording" || pillClosing ? (
                 /* The same mic button becomes STOP (icon morph + spring); the
-                   pill collapses on stop/discard and the clip rides send(). */
+                   pill collapses on stop/discard and the clip rides send().
+                   v2.4.4: ms-auto keeps it at the row's end — during recording
+                   the textarea is unmounted and every desktop-only button is
+                   hidden, so without it the button fell to the row start and
+                   collided with the pill's discard bin. */
                 <MicStopButton
                   recording={voice.phase === "recording"}
                   onStop={stopAndSend}
@@ -1555,7 +1558,7 @@ export function ChatView({
                   disabled={sending}
                   micLabel={t.chat.micRecord}
                   stopLabel={t.chat.stopRec}
-                  className="relative z-20"
+                  className="relative z-20 ms-auto"
                   getLevel={voice.getLevel}
                 />
               ) : (draft.trim() || pendingFile) ? (
@@ -1566,7 +1569,7 @@ export function ChatView({
                   aria-label={t.chat.send}
                   title={t.chat.send}
                 >
-                  {sending ? <span className="spinner" aria-hidden="true" /> : <SendHorizontal className="size-[18px] rtl:-scale-x-100" />}
+                  {sending ? <span className="spinner" aria-hidden="true" /> : <SendIcon className="size-[19px] rtl:-scale-x-100" />}
                 </button>
               ) : (
                 <MicStopButton
@@ -1681,6 +1684,20 @@ function ToolButton({
     >
       {children}
     </button>
+  );
+}
+
+/**
+ * v2.4.4 — Telegram-style paper-plane send icon (the user's pick).
+ * Telegram's plane is drawn as one filled path with a crisp folded wing;
+ * filled geometry keeps it bold and legible at 18–20px, where a stroked
+ * lucide-style plane reads thin. Mirrored in RTL via rtl:-scale-x-100.
+ */
+function SendIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" className={className} aria-hidden="true" fill="currentColor">
+      <path d="M3.4 20.4l17.4-7.5c.8-.4.8-1.5 0-1.9L3.4 3.6c-.7-.3-1.4.2-1.4 1L2 9.4c0 .5.4 1 .9 1l12.4 1.6c.2 0 .2.1 0 .2L2.9 13.7c-.5.1-.9.5-.9 1l.1 4.7c-.1.8.7 1.3 1.4 1z" />
+    </svg>
   );
 }
 
