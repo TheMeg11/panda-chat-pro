@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { sessions, userAvatars, users, type User } from "@/db/schema";
+import { markActivity } from "./activity";
 import { randomToken, sha256 } from "./crypto";
 import { requestMeta } from "./request";
 
@@ -68,6 +69,8 @@ export const getCurrentUser = cache(async (): Promise<CurrentUser | null> => {
   if (row.session.persistent !== parsed.persistent) return null;
   if (row.session.expiresAt.getTime() < Date.now()) return null;
   if (row.user.status !== "active") return null;
+  // Authenticated traffic = user activity (serverless idle gating).
+  markActivity();
   if (Date.now() - row.session.lastSeenAt.getTime() > 5 * 60_000) {
     db.update(sessions)
       .set({ lastSeenAt: new Date() })

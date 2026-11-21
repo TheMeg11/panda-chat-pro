@@ -1,3 +1,4 @@
+import { markActivity } from "@/lib/activity";
 import { chatDelete, chatGet, chatJson, chatPost } from "@/lib/chat-api";
 import { getRoomByToken, resolveGuestAccess } from "@/lib/rooms";
 import { getSettings } from "@/lib/settings";
@@ -28,17 +29,21 @@ export async function GET(req: Request, ctx: Ctx) {
   ensurePoller();
   const r = await resolve(ctx);
   if ("error" in r) return r.error;
+  // An active guest keeps the serverless container awake (2s poll loop).
+  markActivity();
   return chatGet(req, r.room, r.viewer);
 }
 
 export async function POST(req: Request, ctx: Ctx) {
   const r = await resolve(ctx);
   if ("error" in r) return r.error;
+  markActivity();
   return chatPost(req, r.room, r.viewer);
 }
 
 export async function DELETE(req: Request, ctx: Ctx) {
   const r = await resolve(ctx);
   if ("error" in r) return r.error;
+  markActivity();
   return chatDelete(req, r.room, r.viewer);
 }

@@ -1,6 +1,7 @@
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { platformSettings } from "@/db/schema";
+import { markActivity } from "@/lib/activity";
 import { getConfig } from "@/lib/config";
 import { getPlatformBot } from "@/lib/telegram/platform";
 import { handleUpdate, type TgUpdate } from "@/lib/telegram/service";
@@ -53,6 +54,8 @@ export async function POST(req: Request) {
   if (!header || !safeEqual(header, secret)) {
     return Response.json({ ok: false, error: "forbidden" }, { status: 403 });
   }
+  // An authenticated Telegram delivery is user activity (serverless idle gating).
+  markActivity();
 
   const bot = await getPlatformBot();
   if (!bot.configured) return Response.json({ ok: true, skipped: "bot not configured" });

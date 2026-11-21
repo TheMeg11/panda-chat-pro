@@ -1,3 +1,4 @@
+import { markActivity } from "@/lib/activity";
 import { chatJson, filePost } from "@/lib/chat-api";
 import { getRoomByToken, resolveGuestAccess } from "@/lib/rooms";
 import { getSettings } from "@/lib/settings";
@@ -16,6 +17,7 @@ export async function POST(req: Request, ctx: Ctx) {
   if (room.isDisabled) return chatJson({ error: "disabled" }, 403);
   const access = await resolveGuestAccess(room);
   if (access.state !== "chat") return chatJson({ error: access.state }, 403);
+  markActivity();
   const nickname = access.member.nickname ?? "Guest";
   return filePost(req, room, { memberId: access.member.id, nickname, role: "guest", authorName: nickname });
 }

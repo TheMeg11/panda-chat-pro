@@ -3,6 +3,7 @@ import { cookies, headers } from "next/headers";
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { adminSessions } from "@/db/schema";
+import { markActivity } from "./activity";
 import { randomToken, safeEqual, sha256, verifyPassword } from "./crypto";
 import { adminLinkBase, isHostAdmin } from "./admin-host";
 import { requestMeta } from "./request";
@@ -71,6 +72,8 @@ export const getAdminSession = cache(async () => {
   if (!raw || !/^[A-Za-z0-9_-]{32,128}$/.test(raw)) return null;
   const [row] = await db.select().from(adminSessions).where(eq(adminSessions.id, sha256(raw))).limit(1);
   if (!row || row.expiresAt.getTime() < Date.now()) return null;
+  // Panel usage is user activity too (serverless idle gating).
+  markActivity();
   return row;
 });
 
