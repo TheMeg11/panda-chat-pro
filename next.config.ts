@@ -35,7 +35,10 @@ const securityHeaders = [
   { key: "X-Content-Type-Options", value: "nosniff" },
   // Invitation tokens live in URLs — never leak them to other sites through the Referer header.
   { key: "Referrer-Policy", value: "same-origin" },
-  { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=(), payment=(), usb=(), interest-cohort=()" },
+  // v2.4.3: microphone must be (self), not (). With microphone=() the browser
+  // disables getUserMedia for the whole page — no permission prompt is ever
+  // shown and even an allowed mic cannot be detected (NotAllowedError).
+  { key: "Permissions-Policy", value: "camera=(), microphone=(self), geolocation=(), payment=(), usb=(), interest-cohort=()" },
   { key: "X-Frame-Options", value: "DENY" },
   // §4.9: conversational surfaces must never end up in a search engine cache.
   { key: "X-Robots-Tag", value: "noindex, nofollow" },
