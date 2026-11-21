@@ -58,7 +58,7 @@ export default async function AdminBackups({ params, searchParams }: { params: P
                 key <span className="font-mono">{backupKeyHint()}</span>
               </span>
             </div>
-            <a href={`${base}/api/admin/backup`} className="btn btn-primary btn-sm w-fit" download>
+            <a href="/api/admin/backup" className="btn btn-primary btn-sm w-fit" download>
               <Download className="size-4" />
               {t.admin.backupsDownload}
             </a>
@@ -100,7 +100,7 @@ export default async function AdminBackups({ params, searchParams }: { params: P
 
       <div className="mt-6">
         <Section title={t.admin.backupsRestoreTitle} icon={Upload} tone="bg-amber-soft text-amber-ink">
-          <form action={`${base}/api/admin/backup`} method="post" encType="multipart/form-data" className="space-y-4 p-5">
+          <form action="/api/admin/backup" method="post" encType="multipart/form-data" className="space-y-4 p-5">
             <p className="text-sm leading-relaxed text-muted">{t.admin.backupsRestoreText1}</p>
             <ol className="ms-4 list-decimal space-y-1.5 text-sm text-muted">
               <li>{t.admin.backupsRestoreStep1}</li>
