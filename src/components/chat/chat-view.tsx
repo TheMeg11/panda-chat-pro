@@ -42,6 +42,7 @@ import { EmojiPicker } from "@/components/chat/emoji-picker";
 import { GifPicker } from "@/components/chat/gif-picker";
 import { useVoiceRecorder, VoicePlayer, formatSecs } from "@/components/chat/voice";
 import { RecordingPill, MicStopButton } from "@/components/chat/voice-rec-pill";
+import { MicDeniedGuide } from "@/components/chat/mic-denied-guide";
 import {
   captureRows,
   cleanupGhosts,
@@ -1582,20 +1583,25 @@ export function ChatView({
           <div className="mt-1.5 flex min-h-4 items-center justify-between gap-3 px-1 text-[11px] text-faint">
             <span className="hidden sm:inline">{composerLocked ? "" : t.chat.sendHint}</span>
             {voice.micError ? (
-              <span className="font-semibold text-rose-ink">
-                {voice.micError === "denied"
-                  ? t.chat.micDenied
-                  : voice.micError === "busy"
+              voice.micError === "denied" ? (
+                /* v2.4.2 — NotAllowedError also fires in Telegram/Instagram
+                   WebViews and after a dismissed prompt; show the real
+                   recovery steps instead of a dead-end message. */
+                <MicDeniedGuide onRetry={() => void voice.start()} />
+              ) : (
+                <span className="font-semibold text-rose-ink">
+                  {voice.micError === "busy"
                     ? t.chat.micBusy
                     : voice.micError === "empty"
                       ? t.chat.micEmpty
                       : t.chat.micUnsupported}
-                {voice.micDetail ? (
-                  <span className="ms-1 font-mono text-[10px] text-faint" dir="ltr">
-                    [{voice.micDetail}]
-                  </span>
-                ) : null}
-              </span>
+                  {voice.micDetail ? (
+                    <span className="ms-1 font-mono text-[10px] text-faint" dir="ltr">
+                      [{voice.micDetail}]
+                    </span>
+                  ) : null}
+                </span>
+              )
             ) : error ? (
               <span className="flex items-center gap-2">
                 <span className="font-semibold text-rose-ink">{errorText(t, error)}</span>
