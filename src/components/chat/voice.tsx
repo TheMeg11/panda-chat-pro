@@ -195,7 +195,10 @@ export function useVoiceRecorder() {
       source.connect(analyser);
       analyserRef.current = analyser;
       levelBufRef.current = new Uint8Array(new ArrayBuffer(analyser.fftSize));
-      await ctx.resume().catch(() => undefined);
+      // CRITICAL: never await resume() — on mobile (and headless) it can stay
+      // pending forever without a user gesture, which silently stalled the
+      // whole record flow (no phase change, no error). Fire-and-forget.
+      void ctx.resume().catch(() => undefined);
 
       startedRef.current = Date.now();
       chunksRef.current = [];
