@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import {
   ArrowDown,
   Check,
+  Clock,
   ChevronDown,
   ChevronUp,
   Copy,
@@ -560,10 +561,53 @@ export function ChatView({
     if (rawBody.length > maxLength) return setError("messageTooLong");
     setSending(true);
     setError(null);
+    // v2.6.2 — Telegram-style optimistic send: the moment Enter is pressed the
+    // bubble appears locally (pulsing-clock meta) and the composer empties — a
+    // weak-network round-trip no longer holds the draft hostage. Any failure
+    // withdraws the echo and restores the text so the retry affordance below
+    // keeps working.
+    const optimisticId = -Date.now(); // negative → never collides with server ids
+    const replySnapshot = replyTo;
+    const withdrawEcho = () => {
+      setMessages((prev) => prev.filter((x) => x.id !== optimisticId));
+      if (rawBody) {
+        setDraft(rawBody);
+        setReplyTo(replySnapshot);
+      }
+    };
+    if (rawBody) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: optimisticId,
+          body: rawBody,
+          authorName: me?.nickname ?? "",
+          authorRole: "guest",
+          source: "web",
+          memberId: null,
+          createdAt: new Date().toISOString(),
+          mine: true,
+          canDelete: false,
+          file: null,
+          gifId: null,
+          replyTo: replySnapshot ? { id: replySnapshot.id, authorName: replySnapshot.authorName, body: replySnapshot.body, deleted: false } : null,
+          encrypted: false,
+          expiresAt: null,
+          pending: true,
+        },
+      ]);
+      setDraft("");
+      setReplyTo(null);
+      atBottomRef.current = true;
+      // Fly-from-input now targets the echo row (same msg-<id> anchor the real
+      // row will use) instead of waiting for the server round-trip.
+      planFlight(optimisticId, true);
+    }
     try {
       // E2EE conversations: encrypt BEFORE anything leaves the browser (§4.1).
       const unlocked = room.e2eeEnabled ? getUnlocked(roomId) : null;
       if (room.e2eeEnabled && !unlocked) {
+        withdrawEcho();
         setE2eeError("e2eeUnlockFailed");
         return;
       }
@@ -590,6 +634,7 @@ export function ChatView({
         const upRes = await fetch(endpoint.replace(/\/messages$/, "/files"), { method: "POST", body: form, signal: AbortSignal.timeout(30_000) });
         const upData = (await upRes.json().catch(() => ({}))) as { id?: string; error?: string };
         if (!upRes.ok || !upData.id) {
+          withdrawEcho();
           setError(upData.error ?? "uploadFailed");
           return;
         }
@@ -612,6 +657,9 @@ export function ChatView({
       });
       const data = (await res.json().catch(() => ({}))) as ChatSnapshot & { error?: string };
       if (!res.ok) {
+        // v2.6.2 — withdraw the echo and hand the text back so the retry
+        // affordance in the composer footer has something to resend.
+        withdrawEcho();
         const code = data.error ?? "generic";
         if (res.status === 401 || res.status === 404 || res.status === 503 || (res.status === 403 && !["roomLocked", "unauthorized"].includes(code))) {
           setLost(code);
@@ -620,18 +668,15 @@ export function ChatView({
         }
         return;
       }
-      const sentId = data.messages.length ? data.messages[data.messages.length - 1].id : null;
-      // v2.4.0 — fly-from-input: capture the composer position BEFORE the
-      // draft clears / the message is inserted.
-      if (sentId !== null && atBottomRef.current) planFlight(sentId, true);
-      setDraft("");
-      setPendingFile(null);
-      setReplyTo(null);
-      atBottomRef.current = true;
       apply(data);
+      // v2.6.2 — the server confirmed: retire the optimistic echo (the real
+      // row arrived with this snapshot) → the meta clock flips to the check.
+      if (rawBody) setMessages((prev) => prev.filter((x) => x.id !== optimisticId));
+      setPendingFile(null);
     } catch {
       // v2.3.0 — network failure keeps draft + attachment intact and offers
       // an explicit "retry" affordance in the composer footer.
+      withdrawEcho();
       setError("network");
       setRetryable(true);
     } finally {
@@ -1249,6 +1294,20 @@ export function ChatView({
                       ) : null}
                       <span className={cn("mt-0.5 flex items-center justify-end gap-1 text-[10.5px] leading-4", mine ? "opacity-60" : "text-faint")}>
                         <time dateTime={m.createdAt}>{hydrated ? formatDate(m.createdAt, lang, { hour: "2-digit", minute: "2-digit", hour12: lang !== "fa" }) : ""}</time>
+                        {/* v2.6.2 — Telegram-style delivery meta: pulsing clock
+                           while the server round-trip is in flight, a single
+                           check once the message is accepted. */}
+                        {mine ? (
+                          m.pending ? (
+                            <span title={t.chat.sendingHint} aria-label={t.chat.sendingHint}>
+                              <Clock className="size-3 animate-pulse" />
+                            </span>
+                          ) : (
+                            <span title={t.chat.sentHint} aria-label={t.chat.sentHint}>
+                              <Check className="size-3" />
+                            </span>
+                          )
+                        ) : null}
                       </span>
                     </div>
                     <div

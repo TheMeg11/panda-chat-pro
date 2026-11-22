@@ -53,6 +53,34 @@ describe("v1.6.0 contracts", () => {
     expect(view).toContain("/^voice-/");
   });
 
+  it("v2.6.2: optimistic send — instant echo, instant draft clear, server-confirmed check", () => {
+    const view = readFileSync(new URL("../../src/components/chat/chat-view.tsx", import.meta.url), "utf8");
+    // The echo bubble is inserted and the draft cleared BEFORE any await in
+    // send() — the composer must never hostage-wait on the network.
+    const sendIdx = view.indexOf("const send = async (voiceOverride?: File)");
+    const echoIdx = view.indexOf("pending: true");
+    const firstAwait = view.indexOf("await encryptFile", sendIdx);
+    expect(sendIdx).toBeGreaterThan(-1);
+    expect(echoIdx).toBeGreaterThan(sendIdx);
+    expect(echoIdx).toBeLessThan(firstAwait);
+    expect(view).toContain("setDraft(\"\");\n      setReplyTo(null);");
+    // Negative temp ids never collide with server snowflake ids.
+    expect(view).toContain("const optimisticId = -Date.now()");
+    // Server confirm retires the echo; every failure path withdraws it and
+    // restores the draft for the retry affordance.
+    expect(view).toContain("prev.filter((x) => x.id !== optimisticId)");
+    expect((view.match(/withdrawEcho\(\)/g) || []).length).toBeGreaterThanOrEqual(4);
+    expect(view).toContain("setDraft(rawBody)");
+    // Telegram-style meta: pulsing clock while pending, single check on ack.
+    expect(view).toContain("m.pending ? (");
+    expect(view).toContain("<span title={t.chat.sentHint} aria-label={t.chat.sentHint}>");
+    const types = readFileSync(new URL("../../src/lib/chat.ts", import.meta.url), "utf8");
+    expect(types).toContain("pending?: boolean");
+    const i18n = readFileSync(new URL("../../src/lib/i18n.ts", import.meta.url), "utf8");
+    expect(i18n).toContain("sendingHint");
+    expect(i18n).toContain("sentHint");
+  });
+
   it("v2.5.1: file downloads honor account-linked membership (DM voice 403 fix)", () => {
     const route = readFileSync(new URL("../../src/app/api/files/[id]/route.ts", import.meta.url), "utf8");
     // The DM peer's member row is keyed `owner:<userId>` — no browser device

@@ -75,6 +75,9 @@ export type ChatMessage = {
   encrypted: boolean;
   /** self-destruct deadline (ISO) — the row vanishes from feeds once passed */
   expiresAt: string | null;
+  /** v2.6.2 — optimistic send: set on the local echo bubble until the server
+   * confirms (pulsing-clock meta). Real server rows never carry it. */
+  pending?: boolean;
 };
 
 export type ChatRoomInfo = {
