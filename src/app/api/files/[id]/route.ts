@@ -3,7 +3,7 @@ import { db } from "@/db";
 import { files, rooms } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
 import { asciiFallbackName, INLINE_MIMES } from "@/lib/file-mime";
-import { resolveGuestAccess } from "@/lib/rooms";
+import { getAccessibleRoom, resolveGuestAccess } from "@/lib/rooms";
 import { isUuid } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
@@ -33,8 +33,17 @@ export async function GET(_req: Request, ctx: Ctx) {
 
   const user = await getCurrentUser();
   if (!user || user.id !== row.room.ownerId) {
-    const access = await resolveGuestAccess(row.room);
-    if (access.state !== "chat") return new Response("Forbidden", { status: 403 });
+    // v2.5.1 (voice fix): a logged-in member must be granted by ACCOUNT too.
+    // DM peer rows are keyed `owner:<userId>` (dmDeviceHash) — no browser
+    // device cookie can ever match them, so resolveGuestAccess alone answered
+    // 403 for the DM recipient: the voice chip arrived but the audio bytes
+    // never loaded ("the voice plays empty"). Same rule as the messages API:
+    // account-linked membership (DM peer, logged-in join) counts.
+    const allowed = user ? Boolean(await getAccessibleRoom(user.id, row.room.id)) : false;
+    if (!allowed) {
+      const access = await resolveGuestAccess(row.room);
+      if (access.state !== "chat") return new Response("Forbidden", { status: 403 });
+    }
   }
 
   const inline = INLINE_MIMES.has(row.file.mime);

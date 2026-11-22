@@ -196,12 +196,25 @@ export function ChatView({
   const pillClosed = () => {
     setPillClosing(false);
     if (pillActionRef.current !== "send") return;
-    const f = voice.take();
-    voice.discard();
-    if (f) {
-      setPendingFile(f);
-      void send(f);
-    }
+    const trySend = (attempt: number): void => {
+      const f = voice.take();
+      if (f) {
+        voice.discard();
+        setPendingFile(f);
+        void send(f);
+        return;
+      }
+      // v2.5.1: the recorder's onstop (blob) can lag the pill's exit animation
+      // on slow devices — a silent no-send here is exactly the "voice never
+      // reached the other side" report. Retry briefly before giving up.
+      if (attempt < 3) {
+        window.setTimeout(() => trySend(attempt + 1), 350);
+        return;
+      }
+      voice.discard();
+      setError("voiceNotCaptured");
+    };
+    trySend(0);
   };
 
   /* ---- v2.4.0 premium message motion (fly-from-input + spring wave) ---- */

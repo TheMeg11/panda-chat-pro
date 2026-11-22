@@ -53,6 +53,18 @@ describe("v1.6.0 contracts", () => {
     expect(view).toContain("/^voice-/");
   });
 
+  it("v2.5.1: file downloads honor account-linked membership (DM voice 403 fix)", () => {
+    const route = readFileSync(new URL("../../src/app/api/files/[id]/route.ts", import.meta.url), "utf8");
+    // The DM peer's member row is keyed `owner:<userId>` — no browser device
+    // cookie matches it, so the route MUST consult account-linked membership.
+    expect(route).toContain("getAccessibleRoom(user.id, row.room.id)");
+    expect(route).toContain("resolveGuestAccess(row.room)"); // guests still gated
+    // Composer: a not-yet-ready blob retries instead of silently dropping the send.
+    const view = readFileSync(new URL("../../src/components/chat/chat-view.tsx", import.meta.url), "utf8");
+    expect(view).toContain("voiceNotCaptured");
+    expect(view).toContain("trySend(attempt + 1)");
+  });
+
   it("v2.3.0: live DM presence + weak-network resilience", () => {
     const chat = readFileSync(new URL("../../src/lib/chat.ts", import.meta.url), "utf8");
     expect(chat).toContain("peerLastSeenAt");
